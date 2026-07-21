@@ -1,13 +1,12 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "4df0e7bc6ec49a6a3b70bf8cf014e06c"
-name = "magyx-bundle"
-application_url = "https://example.com"
+name = "Magyx Bundle"
+application_url = "https://magyx-bundle-production.up.railway.app"
 embedded = true
 
 [build]
 automatically_update_urls_on_dev = true
-include_config_on_deploy = true
 
 [webhooks]
 api_version = "2026-10"
@@ -17,4 +16,4 @@ api_version = "2026-10"
 scopes = "write_cart_transforms,write_products,write_publications"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://magyx-bundle-production.up.railway.app/api/auth" ]

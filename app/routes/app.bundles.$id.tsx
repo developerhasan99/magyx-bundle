@@ -429,6 +429,7 @@ function formStateOf(bundle: LoaderBundle) {
 export default function BundleBuilder() {
   const { bundle, shopifyProduct } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  const deleteFetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
   const isNew = !bundle;
@@ -729,8 +730,9 @@ export default function BundleBuilder() {
               {
                 content: "Delete",
                 destructive: true,
+                loading: deleteFetcher.state !== "idle",
                 onAction: () =>
-                  fetcher.submit({ intent: "delete" }, { method: "POST" }),
+                  deleteFetcher.submit({ intent: "delete" }, { method: "POST" }),
               },
             ]
       }
