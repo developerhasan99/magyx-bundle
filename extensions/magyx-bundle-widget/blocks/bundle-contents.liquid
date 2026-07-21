@@ -1,0 +1,69 @@
+{%- assign bundle_items = product.metafields.magyx_bundle.components.value -%}
+{%- if bundle_items and bundle_items.size > 0 -%}
+  <div
+    class="magyx-bundle-contents"
+    style="--bc-accent: {{ block.settings.accent_color }};"
+    {{ block.shopify_attributes }}
+  >
+    {%- if block.settings.heading != blank -%}
+      <p class="magyx-bundle-contents__heading">{{ block.settings.heading }}</p>
+    {%- endif -%}
+    <div class="magyx-bundle-contents__list">
+      {%- for item in bundle_items -%}
+        <div class="magyx-bundle-contents__item">
+          <span class="magyx-bundle-contents__num">{{ forloop.index }}</span>
+          {%- if item.imageUrl -%}
+            <img
+              class="magyx-bundle-contents__image"
+              src="{{ item.imageUrl }}"
+              alt="{{ item.title | escape }}"
+              loading="lazy"
+              width="64"
+              height="64"
+            >
+          {%- else -%}
+            <span class="magyx-bundle-contents__image magyx-bundle-contents__image--placeholder"></span>
+          {%- endif -%}
+          <div class="magyx-bundle-contents__info">
+            <p class="magyx-bundle-contents__title">
+              {%- if item.quantity > 1 -%}{{ item.quantity }} × {% endif -%}
+              {{- item.title -}}
+            </p>
+            {%- if block.settings.show_prices and item.price -%}
+              {%- assign item_cents = item.price | times: 100 | round -%}
+              <p class="magyx-bundle-contents__price">{{ item_cents | money }}</p>
+            {%- endif -%}
+          </div>
+        </div>
+      {%- endfor -%}
+    </div>
+  </div>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Bundle Contents",
+  "target": "section",
+  "stylesheet": "magyx-bundle.css",
+  "settings": [
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "What's inside"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_prices",
+      "label": "Show item prices",
+      "default": false
+    },
+    {
+      "type": "color",
+      "id": "accent_color",
+      "label": "Accent color",
+      "default": "#1a1a1a"
+    }
+  ]
+}
+{% endschema %}

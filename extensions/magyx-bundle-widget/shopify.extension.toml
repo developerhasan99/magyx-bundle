@@ -1,0 +1,7 @@
+api_version = "2025-01"
+
+[[extensions]]
+name = "Magyx Bundle Widget"
+handle = "magyx-bundle-widget"
+uid = "469ed936-7ad9-8385-2f20-247848ce5f06a1dcb9ce"
+type = "theme"

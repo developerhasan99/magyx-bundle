@@ -1,0 +1,76 @@
+// Local development schema — mirrors prisma/schema.prisma but targets SQLite
+// so `npm run dev` works with zero local setup. Keep models in sync with the
+// production schema (prisma/schema.prisma, which targets Postgres).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:dev.sqlite"
+}
+
+model Bundle {
+  id              String       @id @default(cuid())
+  shop            String
+  title           String
+  description     String?
+  type            String // FIXED | MIX_MATCH
+  status          String       @default("DRAFT") // DRAFT | ACTIVE | ARCHIVED
+  pricingType     String       @default("PERCENT_OFF") // FIXED_PRICE | PERCENT_OFF | AMOUNT_OFF
+  pricingValue    Float        @default(0)
+  // FIXED bundles: the Shopify parent product we create for the bundle
+  shopifyProductId String?
+  items           BundleItem[]
+  rule            BundleRule?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([shop, status])
+}
+
+model BundleItem {
+  id               String  @id @default(cuid())
+  bundleId         String
+  bundle           Bundle  @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  productId        String // Shopify product GID
+  variantId        String? // Shopify variant GID (null = any variant)
+  productTitle     String
+  productImageUrl  String?
+  quantity         Int     @default(1)
+  position         Int     @default(0)
+}
+
+// Mix & match rules: which products are eligible and the discount tiers
+model BundleRule {
+  id            String @id @default(cuid())
+  bundleId      String @unique
+  bundle        Bundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  minItems      Int    @default(2)
+  maxItems      Int?
+  // JSON: [{ "quantity": 3, "discount": 10 }, { "quantity": 5, "discount": 15 }]
+  discountTiers String @default("[]")
+  // JSON array of eligible collection GIDs
+  collectionIds String @default("[]")
+}
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}

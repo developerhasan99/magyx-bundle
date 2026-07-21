@@ -1,0 +1,298 @@
+.magyx-bundle {
+  --bc-accent: #1a1a1a;
+  --bc-radius: 12px;
+  --bc-border: #e3e3e3;
+  max-width: 980px;
+  margin: 0 auto;
+  font-size: 15px;
+}
+
+.magyx-bundle__hint {
+  text-align: center;
+  opacity: 0.7;
+  padding: 24px 0;
+}
+
+.magyx-bundle__header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.magyx-bundle__title {
+  font-size: 1.5em;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.magyx-bundle__description {
+  opacity: 0.75;
+  margin: 0;
+}
+
+.magyx-bundle__progress {
+  position: sticky;
+  top: 8px;
+  z-index: 2;
+  background: #fff;
+  border: 1px solid var(--bc-border);
+  border-radius: var(--bc-radius);
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+.magyx-bundle__progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.magyx-bundle__progress-save {
+  color: var(--bc-accent);
+}
+
+.magyx-bundle__bar {
+  height: 8px;
+  background: #f0f0f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+/* Some themes hide empty elements (div:empty { display: none }) — the fill
+   div has no content, so force it visible with extra specificity */
+.magyx-bundle__bar .magyx-bundle__bar-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--bc-accent);
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+
+.magyx-bundle__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.magyx-bundle__card {
+  border: 1px solid var(--bc-border);
+  border-radius: var(--bc-radius);
+  padding: 10px;
+  text-align: center;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.magyx-bundle__card--selected {
+  border-color: var(--bc-accent);
+  box-shadow: 0 0 0 1px var(--bc-accent);
+}
+
+.magyx-bundle__card-image {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: calc(var(--bc-radius) - 4px);
+  background: #f6f6f6;
+  margin-bottom: 8px;
+}
+
+.magyx-bundle__card-title {
+  font-weight: 600;
+  font-size: 0.92em;
+  margin: 0 0 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.magyx-bundle__card-price {
+  opacity: 0.75;
+  font-size: 0.9em;
+  margin: 0 0 8px;
+}
+
+.magyx-bundle__stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--bc-border);
+  border-radius: 999px;
+  padding: 4px 6px;
+}
+
+.magyx-bundle__stepper button {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 999px;
+  background: #f2f2f2;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.magyx-bundle__stepper button:hover {
+  background: var(--bc-accent);
+  color: #fff;
+}
+
+.magyx-bundle__stepper button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #f2f2f2;
+  color: inherit;
+}
+
+.magyx-bundle__qty {
+  min-width: 18px;
+  font-weight: 600;
+}
+
+.magyx-bundle__footer {
+  border: 1px solid var(--bc-border);
+  border-radius: var(--bc-radius);
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.magyx-bundle__totals {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.magyx-bundle__total {
+  font-size: 1.3em;
+  font-weight: 700;
+}
+
+.magyx-bundle__compare {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.magyx-bundle__savings {
+  color: var(--bc-accent);
+  font-weight: 600;
+}
+
+.magyx-bundle__cta {
+  background: var(--bc-accent);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 14px 28px;
+  font-size: 1em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.magyx-bundle__cta:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.magyx-bundle__cta:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.magyx-bundle__error {
+  color: #b42318;
+  text-align: center;
+  padding: 12px 0;
+}
+
+@media (max-width: 600px) {
+  .magyx-bundle__grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .magyx-bundle__footer {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+}
+
+/* Bundle Contents block — numbered component cards for fixed bundles */
+.magyx-bundle-contents {
+  --bc-accent: #1a1a1a;
+  --bc-radius: 12px;
+  --bc-border: #e3e3e3;
+  margin: 16px 0;
+}
+
+.magyx-bundle-contents__heading {
+  font-weight: 700;
+  margin: 0 0 10px;
+}
+
+.magyx-bundle-contents__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.magyx-bundle-contents__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1.5px solid var(--bc-accent);
+  border-radius: var(--bc-radius);
+  padding: 10px 14px 10px 20px;
+  background: #fff;
+}
+
+.magyx-bundle-contents__num {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--bc-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.magyx-bundle-contents__image {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.magyx-bundle-contents__image--placeholder {
+  background: #f0f0f0;
+}
+
+.magyx-bundle-contents__info {
+  min-width: 0;
+}
+
+.magyx-bundle-contents__title {
+  font-weight: 600;
+  margin: 0;
+}
+
+.magyx-bundle-contents__price {
+  margin: 2px 0 0;
+  opacity: 0.7;
+  font-size: 0.9em;
+}

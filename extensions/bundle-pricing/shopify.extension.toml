@@ -1,0 +1,17 @@
+api_version = "2026-01"
+
+[[extensions]]
+name = "Magyx Bundle Pricing"
+handle = "bundle-pricing"
+uid = "32ced0d5-a42e-4027-e184-e56929bb95903b96acb8"
+type = "function"
+description = "Expands fixed bundles into components and applies mix & match tiered discounts at checkout."
+
+  [[extensions.targeting]]
+  target = "purchase.cart-transform.run"
+  input_query = "src/run.graphql"
+  export = "run"
+
+  [extensions.build]
+  command = ""
+  path = "dist/function.wasm"

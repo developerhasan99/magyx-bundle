@@ -1,0 +1,48 @@
+<div
+  class="magyx-bundle"
+  data-bundle-id="{{ block.settings.bundle_id | escape }}"
+  data-button-label="{{ block.settings.button_label | escape }}"
+  data-money-format="{{ shop.money_format | escape }}"
+  style="--bc-accent: {{ block.settings.accent_color }};"
+  {{ block.shopify_attributes }}
+>
+  <div class="magyx-bundle__state">
+    {% if block.settings.bundle_id == blank %}
+      <p class="magyx-bundle__hint">
+        Select a bundle: paste its Bundle ID into this block's settings in the
+        theme editor. You can copy the ID from the Magyx Bundle admin.
+      </p>
+    {% else %}
+      <p class="magyx-bundle__hint">Loading bundle…</p>
+    {% endif %}
+  </div>
+</div>
+
+{% schema %}
+{
+  "name": "Mix & Match Bundle",
+  "target": "section",
+  "stylesheet": "magyx-bundle.css",
+  "javascript": "magyx-bundle.js",
+  "settings": [
+    {
+      "type": "text",
+      "id": "bundle_id",
+      "label": "Bundle ID",
+      "info": "Copy the ID from Magyx Bundle → open the bundle → Publishing card."
+    },
+    {
+      "type": "text",
+      "id": "button_label",
+      "label": "Add to cart button label",
+      "default": "Add bundle to cart"
+    },
+    {
+      "type": "color",
+      "id": "accent_color",
+      "label": "Accent color",
+      "default": "#1a1a1a"
+    }
+  ]
+}
+{% endschema %}
