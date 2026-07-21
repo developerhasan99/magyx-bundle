@@ -222,10 +222,18 @@ export async function publishFixedBundleProduct(
     );
   }
 
+  const titleByVariant = new Map(
+    input.displayItems
+      .filter((i): i is typeof i & { variantId: string } => Boolean(i.variantId))
+      .map((i) => [i.variantId, i.title]),
+  );
   const components = input.componentVariantIds.map((c) => ({
     variantId: c.variantId,
     quantity: c.quantity,
     price: priceByVariant.get(c.variantId) ?? 0,
+    // Carried through so the Cart Transform function can label each expanded
+    // cart line (it has no other way to look up product/variant titles)
+    title: titleByVariant.get(c.variantId) ?? "",
   }));
   const combinedPrice =
     Math.round(
