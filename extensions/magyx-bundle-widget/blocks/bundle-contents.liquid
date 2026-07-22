@@ -5,6 +5,21 @@
     style="--bc-accent: {{ block.settings.accent_color }};"
     {{ block.shopify_attributes }}
   >
+    {%- comment -%}
+      Consumed by magyx-bundle-fixed.js to stamp "Item N" line-item properties
+      onto the bundle's own cart line at add-to-cart time, so the properties
+      show up on the parent bundle line rather than on its expanded children.
+    {%- endcomment -%}
+    <script type="application/json" data-magyx-bundle-data>
+      {
+        "variantIds": {{ product.variants | map: "id" | json }},
+        "items": [
+          {%- for item in bundle_items -%}
+            { "title": {{ item.title | json }}, "quantity": {{ item.quantity | default: 1 }} }{%- unless forloop.last -%},{%- endunless -%}
+          {%- endfor -%}
+        ]
+      }
+    </script>
     {%- if block.settings.heading != blank -%}
       <p class="magyx-bundle-contents__heading">{{ block.settings.heading }}</p>
     {%- endif -%}
@@ -45,6 +60,7 @@
   "name": "Bundle Contents",
   "target": "section",
   "stylesheet": "magyx-bundle.css",
+  "javascript": "magyx-bundle-fixed.js",
   "settings": [
     {
       "type": "text",

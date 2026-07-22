@@ -69,9 +69,6 @@ function buildExpandOperation(line, componentsValue) {
           fixedPricePerUnit: { amount: perUnit.toFixed(2) },
         },
       },
-      attributes: component.title
-        ? [{ key: `Item ${i + 1}`, value: component.title }]
-        : [],
     });
   }
 
