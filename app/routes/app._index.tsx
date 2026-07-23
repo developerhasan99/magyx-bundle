@@ -47,7 +47,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       title: b.title,
       type: b.type,
       status: b.status,
-      itemCount: b.items.length,
+      itemCount: b.items.filter((i) => !i.isGift).length,
       updatedAt: b.updatedAt,
     })),
   };

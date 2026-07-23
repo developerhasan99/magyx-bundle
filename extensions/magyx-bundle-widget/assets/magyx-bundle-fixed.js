@@ -15,6 +15,7 @@
   function buildProperties(data) {
     return data.items.map(function (item, index) {
       var value = item.quantity > 1 ? item.quantity + " × " + item.title : item.title;
+      if (item.isGift) value += " (Free gift)";
       return { key: "Item " + (index + 1), value: value };
     });
   }

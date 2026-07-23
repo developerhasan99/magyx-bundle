@@ -36,7 +36,10 @@ function buildExpandOperation(line, componentsValue) {
   const components = data?.components;
   if (!Array.isArray(components) || components.length === 0) return null;
 
-  const combined = components.reduce(
+  const priced = components.filter((c) => !c.isGift);
+  const gifts = components.filter((c) => c.isGift);
+
+  const combined = priced.reduce(
     (sum, c) => sum + (c.price ?? 0) * (c.quantity ?? 1),
     0,
   );
@@ -45,16 +48,18 @@ function buildExpandOperation(line, componentsValue) {
   // The parent line's per-unit cost is the bundle price the merchant set
   const bundlePrice = parseFloat(line.cost.amountPerQuantity.amount);
 
-  // Distribute the bundle price across components proportionally to their
-  // catalog prices; the last component absorbs rounding remainders
+  // Distribute the bundle price across paid components proportionally to
+  // their catalog prices; the last paid component absorbs rounding
+  // remainders. Gift components are priced separately below, always at
+  // exactly $0.00 — they never take part in this allocation.
   const expandedCartItems = [];
   let allocated = 0;
-  for (let i = 0; i < components.length; i++) {
-    const component = components[i];
+  for (let i = 0; i < priced.length; i++) {
+    const component = priced[i];
     const quantity = component.quantity ?? 1;
     const share = ((component.price ?? 0) * quantity) / combined;
     let perUnit;
-    if (i === components.length - 1) {
+    if (i === priced.length - 1) {
       perUnit = (bundlePrice - allocated) / quantity;
     } else {
       perUnit = (bundlePrice * share) / quantity;
@@ -67,6 +72,18 @@ function buildExpandOperation(line, componentsValue) {
       price: {
         adjustment: {
           fixedPricePerUnit: { amount: perUnit.toFixed(2) },
+        },
+      },
+    });
+  }
+
+  for (const gift of gifts) {
+    expandedCartItems.push({
+      merchandiseId: gift.variantId,
+      quantity: gift.quantity ?? 1,
+      price: {
+        adjustment: {
+          fixedPricePerUnit: { amount: "0.00" },
         },
       },
     });

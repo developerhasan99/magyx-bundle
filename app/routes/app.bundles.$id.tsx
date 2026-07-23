@@ -162,6 +162,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         productTitle: i.productTitle,
         productImageUrl: i.productImageUrl,
         quantity: i.quantity,
+        isGift: i.isGift,
         price: i.variantId ? (priceByVariant.get(i.variantId) ?? null) : null,
         missing:
           pricesLoaded && Boolean(i.variantId) && !priceByVariant.has(i.variantId!),
@@ -201,7 +202,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const hasPool =
     payload.items.length > 0 || (payload.rule?.collectionIds?.length ?? 0) > 0;
   if (!payload.title?.trim()) errors.push("Title is required.");
-  if (payload.type === "FIXED" && payload.items.length < 2)
+  if (payload.type === "FIXED" && payload.items.filter((i) => !i.isGift).length < 2)
     errors.push("Fixed bundles need at least two products.");
   if (payload.type !== "FIXED" && !hasPool)
     errors.push("Add products or select at least one collection for customers to pick from.");
@@ -231,7 +232,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (bundle.type === "FIXED" && bundle.status === "ACTIVE") {
     const componentVariantIds = bundle.items
       .filter((i) => i.variantId)
-      .map((i) => ({ variantId: i.variantId!, quantity: i.quantity }));
+      .map((i) => ({ variantId: i.variantId!, quantity: i.quantity, isGift: i.isGift }));
     try {
       await publishFixedBundleProduct(
         admin,
@@ -247,6 +248,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             imageUrl: i.productImageUrl,
             quantity: i.quantity,
             variantId: i.variantId,
+            isGift: i.isGift,
           })),
         },
         bundle.shopifyProductId,
@@ -274,6 +276,7 @@ interface ItemState {
   productTitle: string;
   productImageUrl: string | null;
   quantity: number;
+  isGift: boolean;
   // Live variant price for display only (combined/compare-at math); not persisted
   price: number | null;
   // True when the referenced variant no longer exists in Shopify
@@ -408,6 +411,7 @@ function formStateOf(bundle: LoaderBundle) {
         productTitle: i.productTitle,
         productImageUrl: i.productImageUrl ?? null,
         quantity: i.quantity,
+        isGift: i.isGift ?? false,
         price: i.price ?? null,
         missing: i.missing ?? false,
       })) ?? [],
@@ -453,6 +457,11 @@ export default function BundleBuilder() {
   const [maxItems, setMaxItems] = useState(initialForm.maxItems);
   const [tiers, setTiers] = useState<TierState[]>(initialForm.tiers);
 
+  // Gifts only apply to FIXED bundles; paidItems/giftItems split the single
+  // items array for rendering and price math without mutating storage shape
+  const paidItems = useMemo(() => items.filter((i) => !i.isGift), [items]);
+  const giftItems = useMemo(() => items.filter((i) => i.isGift), [items]);
+
   const isSaving = fetcher.state !== "idle";
 
   const isDirty = useMemo(
@@ -489,14 +498,17 @@ export default function BundleBuilder() {
     }
   }, [fetcher.state, fetcher.data, shopify]);
 
-  const openResourcePicker = useCallback(async () => {
+  const openResourcePicker = useCallback(async (isGiftFlag: boolean) => {
     // Fixed bundles are variant-level: preselect the exact variants so the
     // picker shows them checked, and each selected variant becomes its own
-    // line item. Pool types stay product-level.
+    // line item. Pool types stay product-level. Scoped to the matching
+    // group (paid vs. gift) so picking gifts doesn't preselect/overwrite
+    // the paid component list, and vice versa.
+    const groupItems = items.filter((i) => i.isGift === isGiftFlag);
     const selectionIds =
       type === "FIXED"
         ? Array.from(
-            items.reduce((byProduct, item) => {
+            groupItems.reduce((byProduct, item) => {
               if (item.variantId) {
                 const entry = byProduct.get(item.productId) ?? {
                   id: item.productId,
@@ -512,7 +524,7 @@ export default function BundleBuilder() {
             ([, entry]) =>
               entry.variants.length > 0 ? entry : { id: entry.id },
           )
-        : items.map((i) => ({ id: i.productId }));
+        : groupItems.map((i) => ({ id: i.productId }));
 
     const selection = await shopify.resourcePicker({
       type: "product",
@@ -529,10 +541,15 @@ export default function BundleBuilder() {
 
     if (type === "FIXED") {
       setItems((current) => {
+        // Scoped to the same group so an existing paid item isn't reused
+        // (with the wrong isGift flag) when adding to the gift group, or
+        // vice versa.
         const byVariant = new Map(
-          current.map((i) => [i.variantId ?? i.productId, i]),
+          current
+            .filter((i) => i.isGift === isGiftFlag)
+            .map((i) => [i.variantId ?? i.productId, i]),
         );
-        return selection.flatMap((product: any) => {
+        const newGroupItems = selection.flatMap((product: any) => {
           const variants: any[] = product.variants?.length
             ? product.variants
             : [null];
@@ -552,11 +569,13 @@ export default function BundleBuilder() {
                 product.images?.[0]?.originalSrc ??
                 null,
               quantity: 1,
+              isGift: isGiftFlag,
               price: toPrice(variant?.price),
               missing: false,
             };
           });
         });
+        return [...current.filter((i) => i.isGift !== isGiftFlag), ...newGroupItems];
       });
       return;
     }
@@ -571,6 +590,7 @@ export default function BundleBuilder() {
             productTitle: product.title,
             productImageUrl: product.images?.[0]?.originalSrc ?? null,
             quantity: 1,
+            isGift: false,
             price: toPrice(product.variants?.[0]?.price),
             missing: false,
           },
@@ -671,9 +691,9 @@ export default function BundleBuilder() {
   const combinedPrice = useMemo(
     () =>
       Math.round(
-        items.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0) * 100,
+        paidItems.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0) * 100,
       ) / 100,
-    [items],
+    [paidItems],
   );
   const hasMissingPrices = items.some((i) => i.price == null);
   const computedBundlePrice = useMemo(() => {
@@ -837,7 +857,7 @@ export default function BundleBuilder() {
                         Add collections
                       </Button>
                     ) : (
-                      <Button icon={PlusIcon} onClick={openResourcePicker}>
+                      <Button icon={PlusIcon} onClick={() => openResourcePicker(false)}>
                         Add products
                       </Button>
                     )}
@@ -906,7 +926,7 @@ export default function BundleBuilder() {
                         ))}
                       </BlockStack>
                     )
-                  ) : items.length === 0 ? (
+                  ) : paidItems.length === 0 ? (
                     <Box padding="400">
                       <Text as="p" tone="subdued" alignment="center">
                         {type === "FIXED"
@@ -916,7 +936,7 @@ export default function BundleBuilder() {
                     </Box>
                   ) : (
                     <BlockStack gap="300">
-                      {items.map((item, index) => (
+                      {paidItems.map((item, index) => (
                         <Box key={item.variantId ?? item.productId}>
                           {index > 0 && <Box paddingBlockEnd="300"><Divider /></Box>}
                           <InlineStack
@@ -961,8 +981,9 @@ export default function BundleBuilder() {
                                     value={String(item.quantity)}
                                     onChange={(value) =>
                                       setItems((current) =>
-                                        current.map((c, i) =>
-                                          i === index
+                                        current.map((c) =>
+                                          (c.variantId ?? c.productId) ===
+                                          (item.variantId ?? item.productId)
                                             ? { ...c, quantity: Math.max(1, parseInt(value, 10) || 1) }
                                             : c,
                                         ),
@@ -980,7 +1001,11 @@ export default function BundleBuilder() {
                                 accessibilityLabel={`Remove ${item.productTitle}`}
                                 onClick={() =>
                                   setItems((current) =>
-                                    current.filter((_, i) => i !== index),
+                                    current.filter(
+                                      (c) =>
+                                        (c.variantId ?? c.productId) !==
+                                        (item.variantId ?? item.productId),
+                                    ),
                                   )
                                 }
                               />
@@ -992,6 +1017,103 @@ export default function BundleBuilder() {
                   )}
                 </BlockStack>
               </Card>
+
+              {type === "FIXED" && (
+                <Card>
+                  <BlockStack gap="400">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text as="h2" variant="headingMd">
+                        Free gifts
+                      </Text>
+                      <Button icon={PlusIcon} onClick={() => openResourcePicker(true)}>
+                        Add free gift
+                      </Button>
+                    </InlineStack>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Optional. These products are always included at $0
+                      alongside the bundle — they don&apos;t affect its price.
+                    </Text>
+                    {giftItems.length === 0 ? (
+                      <Box padding="400">
+                        <Text as="p" tone="subdued" alignment="center">
+                          No free gifts added.
+                        </Text>
+                      </Box>
+                    ) : (
+                      <BlockStack gap="300">
+                        {giftItems.map((item, index) => (
+                          <Box key={item.variantId ?? item.productId}>
+                            {index > 0 && <Box paddingBlockEnd="300"><Divider /></Box>}
+                            <InlineStack
+                              gap="300"
+                              blockAlign="center"
+                              align="space-between"
+                              wrap={false}
+                            >
+                              <InlineStack gap="300" blockAlign="center" wrap={false}>
+                                <Thumbnail
+                                  source={item.productImageUrl || ImageIcon}
+                                  alt={item.productTitle}
+                                  size="small"
+                                />
+                                <BlockStack gap="050" inlineAlign="start">
+                                  <InlineStack gap="200" blockAlign="center">
+                                    <Text as="span" variant="bodyMd" fontWeight="medium">
+                                      {item.productTitle}
+                                    </Text>
+                                    {item.missing && (
+                                      <Badge tone="critical">Deleted from store</Badge>
+                                    )}
+                                  </InlineStack>
+                                  <Badge tone="success">Free gift</Badge>
+                                </BlockStack>
+                              </InlineStack>
+                              <InlineStack gap="200" blockAlign="center" wrap={false}>
+                                <div style={{ width: 90 }}>
+                                  <TextField
+                                    label="Qty"
+                                    labelHidden
+                                    type="number"
+                                    min={1}
+                                    value={String(item.quantity)}
+                                    onChange={(value) =>
+                                      setItems((current) =>
+                                        current.map((c) =>
+                                          (c.variantId ?? c.productId) ===
+                                          (item.variantId ?? item.productId)
+                                            ? { ...c, quantity: Math.max(1, parseInt(value, 10) || 1) }
+                                            : c,
+                                        ),
+                                      )
+                                    }
+                                    autoComplete="off"
+                                    prefix="×"
+                                  />
+                                </div>
+                                <Button
+                                  icon={DeleteIcon}
+                                  variant="tertiary"
+                                  tone="critical"
+                                  accessibilityLabel={`Remove ${item.productTitle}`}
+                                  onClick={() =>
+                                    setItems((current) =>
+                                      current.filter(
+                                        (c) =>
+                                          (c.variantId ?? c.productId) !==
+                                          (item.variantId ?? item.productId),
+                                      ),
+                                    )
+                                  }
+                                />
+                              </InlineStack>
+                            </InlineStack>
+                          </Box>
+                        ))}
+                      </BlockStack>
+                    )}
+                  </BlockStack>
+                </Card>
+              )}
 
               {type === "SLOT_BUILDER" && (
                 <Card>
@@ -1051,7 +1173,7 @@ export default function BundleBuilder() {
                         error={pricingValueError}
                       />
                     </div>
-                    {type === "FIXED" && items.length > 0 && (
+                    {type === "FIXED" && paidItems.length > 0 && (
                       <Box background="bg-surface-secondary" borderRadius="200" padding="300">
                         <BlockStack gap="200">
                           <InlineStack align="space-between" blockAlign="center">

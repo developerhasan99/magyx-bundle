@@ -41,6 +41,7 @@ model BundleItem {
   productTitle     String
   productImageUrl  String?
   quantity         Int     @default(1)
+  isGift           Boolean @default(false)
   position         Int     @default(0)
 }
 

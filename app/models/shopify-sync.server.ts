@@ -169,13 +169,14 @@ interface FixedBundlePublishInput {
   description?: string | null;
   pricingType: string;
   pricingValue: number;
-  componentVariantIds: { variantId: string; quantity: number }[];
+  componentVariantIds: { variantId: string; quantity: number; isGift?: boolean }[];
   // Denormalized item info for the storefront widget's "what's inside" cards
   displayItems: {
     title: string;
     imageUrl: string | null;
     quantity: number;
     variantId: string | null;
+    isGift?: boolean;
   }[];
 }
 
@@ -230,7 +231,10 @@ export async function publishFixedBundleProduct(
   const components = input.componentVariantIds.map((c) => ({
     variantId: c.variantId,
     quantity: c.quantity,
-    price: priceByVariant.get(c.variantId) ?? 0,
+    isGift: c.isGift ?? false,
+    // Gifts are always $0 — excluded from the bundle price allocation below,
+    // regardless of their real catalog price (used only for display)
+    price: c.isGift ? 0 : (priceByVariant.get(c.variantId) ?? 0),
     // Carried through so the Cart Transform function can label each expanded
     // cart line (it has no other way to look up product/variant titles)
     title: titleByVariant.get(c.variantId) ?? "",
@@ -349,6 +353,7 @@ export async function publishFixedBundleProduct(
       imageUrl: item.imageUrl,
       quantity: item.quantity,
       price: item.variantId ? (priceByVariant.get(item.variantId) ?? null) : null,
+      isGift: item.isGift ?? false,
     }));
     const displayResponse = await admin.graphql(
       `#graphql

@@ -15,6 +15,7 @@ export interface BundleItemInput {
   productTitle: string;
   productImageUrl?: string | null;
   quantity: number;
+  isGift: boolean;
   position: number;
 }
 
