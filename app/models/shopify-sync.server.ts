@@ -175,6 +175,7 @@ interface FixedBundlePublishInput {
     title: string;
     imageUrl: string | null;
     quantity: number;
+    productId: string;
     variantId: string | null;
     isGift?: boolean;
   }[];
@@ -185,7 +186,126 @@ interface FixedBundlePublishInput {
     heading: string;
     accentColor: string;
     showPrices: boolean;
+    itemSubtextTemplate: string;
   };
+}
+
+const SUBTEXT_PLACEHOLDER_RE =
+  /\{\{\s*(sku|vendor|type|barcode|weight)\s*\}\}|\{\{\s*metafield:([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\s*\}\}/g;
+
+function extractMetafieldRefs(template: string): { namespace: string; key: string }[] {
+  const refs = new Map<string, { namespace: string; key: string }>();
+  const re = new RegExp(SUBTEXT_PLACEHOLDER_RE.source, "g");
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(template))) {
+    const [, , namespace, key] = match;
+    if (namespace && key) refs.set(`${namespace}.${key}`, { namespace, key });
+  }
+  return Array.from(refs.values());
+}
+
+interface ItemDetails {
+  sku: string | null;
+  vendor: string | null;
+  type: string | null;
+  barcode: string | null;
+  weight: string | null;
+  metafields: Record<string, string | null>;
+}
+
+function resolveItemSubtext(template: string, details: ItemDetails): string {
+  return template
+    .replace(SUBTEXT_PLACEHOLDER_RE, (_match, basicField, namespace, key) => {
+      if (basicField) return details[basicField as keyof Omit<ItemDetails, "metafields">] ?? "";
+      if (namespace && key) return details.metafields[`${namespace}.${key}`] ?? "";
+      return "";
+    })
+    .trim();
+}
+
+/**
+ * Resolves {{sku}}/{{vendor}}/{{type}}/{{barcode}}/{{weight}}/{{metafield:ns.key}}
+ * placeholders in the merchant's item subtext template against live product
+ * data — one extra query, only made when a template is actually set.
+ */
+async function fetchItemSubtexts(
+  admin: AdminApiContext,
+  items: { productId: string; variantId: string | null }[],
+  template: string,
+): Promise<Map<string, string>> {
+  const metafieldRefs = extractMetafieldRefs(template);
+  const productIds = Array.from(new Set(items.map((i) => i.productId)));
+  const variantIds = items
+    .map((i) => i.variantId)
+    .filter((id): id is string => Boolean(id));
+
+  const metafieldFragment = metafieldRefs
+    .map((ref, i) => `mf${i}: metafield(namespace: "${ref.namespace}", key: "${ref.key}") { value }`)
+    .join("\n");
+
+  const response = await admin.graphql(
+    `#graphql
+    query bundleItemSubtextDetails($productIds: [ID!]!, $variantIds: [ID!]!) {
+      products: nodes(ids: $productIds) {
+        ... on Product {
+          id
+          vendor
+          productType
+          ${metafieldFragment}
+        }
+      }
+      variants: nodes(ids: $variantIds) {
+        ... on ProductVariant {
+          id
+          sku
+          barcode
+          inventoryItem {
+            measurement {
+              weight { value unit }
+            }
+          }
+        }
+      }
+    }`,
+    { variables: { productIds, variantIds } },
+  );
+  const json = await response.json();
+  const productById = new Map<string, Record<string, unknown>>(
+    ((json.data?.products ?? []) as (Record<string, unknown> | null)[])
+      .filter((p): p is Record<string, unknown> => Boolean(p))
+      .map((p) => [p.id as string, p]),
+  );
+  const variantById = new Map<string, Record<string, unknown>>(
+    ((json.data?.variants ?? []) as (Record<string, unknown> | null)[])
+      .filter((v): v is Record<string, unknown> => Boolean(v))
+      .map((v) => [v.id as string, v]),
+  );
+
+  const subtextByKey = new Map<string, string>();
+  for (const item of items) {
+    const product = productById.get(item.productId);
+    const variant = item.variantId ? variantById.get(item.variantId) : undefined;
+    const metafields: Record<string, string | null> = {};
+    metafieldRefs.forEach((ref, i) => {
+      const mf = product?.[`mf${i}`] as { value?: string } | null | undefined;
+      metafields[`${ref.namespace}.${ref.key}`] = mf?.value ?? null;
+    });
+    const weight = (
+      variant?.inventoryItem as
+        | { measurement?: { weight?: { value: number; unit: string } | null } }
+        | undefined
+    )?.measurement?.weight;
+    const details: ItemDetails = {
+      sku: (variant?.sku as string | null) ?? null,
+      vendor: (product?.vendor as string | null) ?? null,
+      type: (product?.productType as string | null) ?? null,
+      barcode: (variant?.barcode as string | null) ?? null,
+      weight: weight ? `${weight.value} ${weight.unit.toLowerCase()}` : null,
+      metafields,
+    };
+    subtextByKey.set(item.variantId ?? item.productId, resolveItemSubtext(template, details));
+  }
+  return subtextByKey;
 }
 
 /**
@@ -356,6 +476,16 @@ export async function publishFixedBundleProduct(
   // block Liquid can read it; checkout truth stays in the variant metafield.
   // Soft-fails: a broken storefront card list shouldn't block saving.
   try {
+    const subtextTemplate = input.widgetSettings.itemSubtextTemplate.trim();
+    let subtextByKey: Map<string, string> | null = null;
+    if (subtextTemplate) {
+      try {
+        subtextByKey = await fetchItemSubtexts(admin, input.displayItems, subtextTemplate);
+      } catch (error) {
+        console.warn("Magyx Bundle: could not resolve item subtext template", error);
+      }
+    }
+
     const displayValue = {
       settings: input.widgetSettings,
       items: input.displayItems.map((item) => ({
@@ -364,6 +494,7 @@ export async function publishFixedBundleProduct(
         quantity: item.quantity,
         price: item.variantId ? (priceByVariant.get(item.variantId) ?? null) : null,
         isGift: item.isGift ?? false,
+        subtext: subtextByKey?.get(item.variantId ?? item.productId) || null,
       })),
     };
     const displayResponse = await admin.graphql(

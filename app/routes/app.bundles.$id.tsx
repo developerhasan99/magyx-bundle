@@ -162,6 +162,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       widgetHeading: bundle.widgetHeading,
       accentColor: bundle.accentColor,
       showPrices: bundle.showPrices,
+      itemSubtextTemplate: bundle.itemSubtextTemplate,
       items: bundle.items.map((i) => ({
         productId: i.productId,
         variantId: i.variantId,
@@ -253,6 +254,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             title: i.productTitle,
             imageUrl: i.productImageUrl,
             quantity: i.quantity,
+            productId: i.productId,
             variantId: i.variantId,
             isGift: i.isGift,
           })),
@@ -261,6 +263,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             heading: bundle.widgetHeading,
             accentColor: bundle.accentColor,
             showPrices: bundle.showPrices,
+            itemSubtextTemplate: bundle.itemSubtextTemplate,
           },
         },
         bundle.shopifyProductId,
@@ -615,6 +618,7 @@ function formStateOf(bundle: LoaderBundle) {
     widgetHeading: bundle?.widgetHeading ?? "What's inside",
     accentColor: bundle?.accentColor ?? "#1a1a1a",
     showPrices: bundle?.showPrices ?? false,
+    itemSubtextTemplate: bundle?.itemSubtextTemplate ?? "",
     items:
       bundle?.items.map((i): ItemState => ({
         productId: i.productId,
@@ -662,6 +666,9 @@ export default function BundleBuilder() {
   const [widgetHeading, setWidgetHeading] = useState(initialForm.widgetHeading);
   const [accentColor, setAccentColor] = useState(initialForm.accentColor);
   const [showPrices, setShowPrices] = useState(initialForm.showPrices);
+  const [itemSubtextTemplate, setItemSubtextTemplate] = useState(
+    initialForm.itemSubtextTemplate,
+  );
   const [items, setItems] = useState<ItemState[]>(initialForm.items);
   const [collections, setCollections] = useState<CollectionState[]>(
     initialForm.collections,
@@ -683,13 +690,13 @@ export default function BundleBuilder() {
     () =>
       JSON.stringify({
         title, type, status, pricingType, pricingValue, widgetStyle,
-        widgetHeading, accentColor, showPrices, items, collections,
-        poolSource, slotCount, minItems, maxItems, tiers,
+        widgetHeading, accentColor, showPrices, itemSubtextTemplate, items,
+        collections, poolSource, slotCount, minItems, maxItems, tiers,
       }) !== JSON.stringify(initialForm),
     [
       initialForm, title, type, status, pricingType, pricingValue,
-      widgetStyle, widgetHeading, accentColor, showPrices, items,
-      collections, poolSource, slotCount, minItems, maxItems, tiers,
+      widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
+      items, collections, poolSource, slotCount, minItems, maxItems, tiers,
     ],
   );
 
@@ -703,6 +710,7 @@ export default function BundleBuilder() {
     setWidgetHeading(initialForm.widgetHeading);
     setAccentColor(initialForm.accentColor);
     setShowPrices(initialForm.showPrices);
+    setItemSubtextTemplate(initialForm.itemSubtextTemplate);
     setItems(initialForm.items);
     setCollections(initialForm.collections);
     setPoolSource(initialForm.poolSource);
@@ -875,6 +883,7 @@ export default function BundleBuilder() {
       widgetHeading,
       accentColor,
       showPrices,
+      itemSubtextTemplate,
       // price/missing are editor-only display state — the DB schema doesn't store them
       items: usesCollections
         ? []
@@ -908,7 +917,7 @@ export default function BundleBuilder() {
     );
   }, [
     fetcher, title, description, type, status, pricingType, pricingValue,
-    widgetStyle, widgetHeading, accentColor, showPrices,
+    widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
     items, minItems, maxItems, tiers, poolSource, collections, slotCount,
   ]);
 
@@ -1646,7 +1655,15 @@ export default function BundleBuilder() {
                       label="Show item prices"
                       checked={showPrices}
                       onChange={setShowPrices}
-                      helpText="Free gifts always show a “Free gift” badge instead of a price."
+                      helpText="Free gifts will also show a “Free gift” badge."
+                    />
+                    <TextField
+                      label="Item subtext"
+                      value={itemSubtextTemplate}
+                      onChange={setItemSubtextTemplate}
+                      autoComplete="off"
+                      placeholder="e.g. SKU: {{sku}} · {{metafield:custom.material}}"
+                      helpText="Optional line shown under each product's title. Insert {{sku}}, {{vendor}}, {{type}}, {{barcode}}, {{weight}}, or {{metafield:namespace.key}} — resolved per product when you save."
                     />
                   </BlockStack>
                 </Card>

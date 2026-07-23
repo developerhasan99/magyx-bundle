@@ -72,6 +72,9 @@
                 {%- endif -%}
               </div>
               <p class="magyx-bundle-contents__tile-title">{{ item.title }}</p>
+              {%- if item.subtext != blank -%}
+                <p class="magyx-bundle-contents__tile-subtext">{{ item.subtext }}</p>
+              {%- endif -%}
               {%- if show_prices and item.price -%}
                 {%- assign item_cents = item.price | times: 100 | round -%}
                 <p class="magyx-bundle-contents__tile-price">{{ item_cents | money }}</p>
@@ -97,9 +100,14 @@
               {%- else -%}
                 <span class="magyx-bundle-contents__row-image magyx-bundle-contents__image--placeholder"></span>
               {%- endif -%}
-              <span class="magyx-bundle-contents__row-title">
-                {%- if item.quantity > 1 -%}{{ item.quantity }} × {% endif -%}
-                {{- item.title -}}
+              <span class="magyx-bundle-contents__row-text">
+                <span class="magyx-bundle-contents__row-title">
+                  {%- if item.quantity > 1 -%}{{ item.quantity }} × {% endif -%}
+                  {{- item.title -}}
+                </span>
+                {%- if item.subtext != blank -%}
+                  <span class="magyx-bundle-contents__row-subtext">{{ item.subtext }}</span>
+                {%- endif -%}
               </span>
               {%- if item.isGift -%}
                 <span class="magyx-bundle-contents__gift-badge magyx-bundle-contents__gift-badge--sm">Free gift</span>
@@ -133,6 +141,9 @@
                   {%- if item.quantity > 1 -%}{{ item.quantity }} × {% endif -%}
                   {{- item.title -}}
                 </p>
+                {%- if item.subtext != blank -%}
+                  <p class="magyx-bundle-contents__subtext">{{ item.subtext }}</p>
+                {%- endif -%}
                 {%- if item.isGift -%}
                   <span class="magyx-bundle-contents__gift-badge">Free gift</span>
                 {%- elsif show_prices and item.price -%}

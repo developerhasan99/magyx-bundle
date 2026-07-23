@@ -326,6 +326,12 @@
   font-size: 0.88em;
 }
 
+.magyx-bundle-contents__subtext {
+  margin: 2px 0 0;
+  opacity: 0.6;
+  font-size: 0.85em;
+}
+
 /* ---------- Grid: image-forward tiles, like a mini product grid ---------- */
 .magyx-bundle-contents__grid {
   display: grid;
@@ -402,6 +408,12 @@
   overflow: hidden;
 }
 
+.magyx-bundle-contents__tile-subtext {
+  margin: 2px 0 0;
+  opacity: 0.6;
+  font-size: 0.8em;
+}
+
 .magyx-bundle-contents__tile-price {
   margin: 3px 0 0;
   opacity: 0.65;
@@ -452,10 +464,24 @@
   flex-shrink: 0;
 }
 
-.magyx-bundle-contents__row-title {
+.magyx-bundle-contents__row-text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.magyx-bundle-contents__row-title {
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.magyx-bundle-contents__row-subtext {
+  margin-top: 1px;
+  opacity: 0.6;
+  font-size: 0.82em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

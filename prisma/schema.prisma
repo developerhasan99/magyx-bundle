@@ -29,6 +29,9 @@ model Bundle {
   widgetHeading   String       @default("What's inside")
   accentColor     String       @default("#1a1a1a")
   showPrices      Boolean      @default(false)
+  // Plain text + {{sku}}/{{vendor}}/{{type}}/{{barcode}}/{{weight}}/{{metafield:ns.key}}
+  // placeholders, resolved per-item and rendered under each product's title
+  itemSubtextTemplate String   @default("")
   items           BundleItem[]
   rule            BundleRule?
   createdAt       DateTime     @default(now())
