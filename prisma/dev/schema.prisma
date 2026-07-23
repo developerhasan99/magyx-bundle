@@ -31,6 +31,8 @@ model Bundle {
   // placeholders, resolved per-item and rendered under each product's title
   itemSubtextTemplate String   @default("")
   showSubtextOnGifts  Boolean  @default(true)
+  // FIXED bundles: waives shipping at checkout when this bundle is bought
+  freeShipping    Boolean      @default(false)
   items           BundleItem[]
   rule            BundleRule?
   createdAt       DateTime     @default(now())

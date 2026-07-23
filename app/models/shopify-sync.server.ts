@@ -3,6 +3,11 @@ import { getBundles, setBundleProduct } from "./bundle.server";
 
 const CONFIG_NAMESPACE = "$app:magyx-bundle";
 const CONFIG_KEY = "config";
+// Shop metafield caching the id of the shared $0 "Free Shipping" marker
+// variant (see ensureFreeShippingMarkerVariant), and the variant metafield
+// key the free-shipping Discount Function checks for on cart lines.
+const FREE_SHIPPING_MARKER_VARIANT_KEY = "free_shipping_marker_variant_id";
+const FREE_SHIPPING_MARKER_METAFIELD_KEY = "free_shipping_marker";
 
 /**
  * Publishes all ACTIVE bundles for the shop into an app-owned shop metafield.
@@ -72,6 +77,9 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
   if (active.length > 0) {
     await ensureCartTransformActivated(admin);
   }
+  if (active.some((b) => b.freeShipping)) {
+    await ensureFreeShippingDiscountActivated(admin);
+  }
 }
 
 /**
@@ -119,6 +127,194 @@ export async function ensureCartTransformActivated(admin: AdminApiContext) {
     }
   } catch (error) {
     console.warn("Magyx Bundle: could not activate cart transform", error);
+  }
+}
+
+/**
+ * The Cart Transform function can only expand a bundle line into real
+ * product variants, and by the time a Discount Function runs afterward it
+ * only ever sees those expanded lines — the parent bundle product is gone,
+ * so there's no way to tell "this line came from a bundle with free shipping
+ * enabled" from the expanded cart alone. Instead, a single shop-owned $0
+ * "Free Shipping" variant acts as the signal: any bundle with free shipping
+ * enabled quietly includes it as a $0 gift component (like any other gift —
+ * no Cart Transform changes needed), and the free-shipping Discount Function
+ * waives shipping whenever it's present in the cart. Created once per shop
+ * and cached in a metafield; never published to a sales channel.
+ */
+async function ensureFreeShippingMarkerVariant(admin: AdminApiContext): Promise<string> {
+  const shopResponse = await admin.graphql(
+    `#graphql
+    query freeShippingMarkerShop($namespace: String!, $key: String!) {
+      shop {
+        id
+        metafield(namespace: $namespace, key: $key) { value }
+      }
+    }`,
+    { variables: { namespace: CONFIG_NAMESPACE, key: FREE_SHIPPING_MARKER_VARIANT_KEY } },
+  );
+  const shopJson = await shopResponse.json();
+  const cachedVariantId: string | undefined = shopJson.data?.shop?.metafield?.value;
+  if (cachedVariantId) return cachedVariantId;
+  const shopId = shopJson.data?.shop?.id;
+
+  const createResponse = await admin.graphql(
+    `#graphql
+    mutation createFreeShippingMarkerProduct($product: ProductCreateInput!) {
+      productCreate(product: $product) {
+        product {
+          id
+          variants(first: 1) { edges { node { id } } }
+        }
+        userErrors { field message }
+      }
+    }`,
+    {
+      variables: {
+        product: {
+          title: "Free Shipping",
+          tags: ["magyx-bundle"],
+          status: "ACTIVE",
+        },
+      },
+    },
+  );
+  const createJson = await createResponse.json();
+  const createErrors = createJson.data?.productCreate?.userErrors ?? [];
+  if (createErrors.length) {
+    throw new Error(`Failed to create free shipping marker product: ${JSON.stringify(createErrors)}`);
+  }
+  const productId = createJson.data.productCreate.product.id;
+  const variantId = createJson.data.productCreate.product.variants.edges[0].node.id;
+
+  const updateResponse = await admin.graphql(
+    `#graphql
+    mutation setFreeShippingMarkerVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+        userErrors { field message }
+      }
+    }`,
+    {
+      variables: {
+        productId,
+        variants: [
+          {
+            id: variantId,
+            price: "0.00",
+            metafields: [
+              {
+                namespace: CONFIG_NAMESPACE,
+                key: FREE_SHIPPING_MARKER_METAFIELD_KEY,
+                type: "single_line_text_field",
+                value: "true",
+              },
+            ],
+          },
+        ],
+      },
+    },
+  );
+  const updateErrors =
+    (await updateResponse.json()).data?.productVariantsBulkUpdate?.userErrors ?? [];
+  if (updateErrors.length) {
+    throw new Error(`Failed to configure free shipping marker variant: ${JSON.stringify(updateErrors)}`);
+  }
+
+  const cacheResponse = await admin.graphql(
+    `#graphql
+    mutation cacheFreeShippingMarkerVariant($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        userErrors { field message }
+      }
+    }`,
+    {
+      variables: {
+        metafields: [
+          {
+            ownerId: shopId,
+            namespace: CONFIG_NAMESPACE,
+            key: FREE_SHIPPING_MARKER_VARIANT_KEY,
+            type: "single_line_text_field",
+            value: variantId,
+          },
+        ],
+      },
+    },
+  );
+  const cacheErrors = (await cacheResponse.json()).data?.metafieldsSet?.userErrors ?? [];
+  if (cacheErrors.length) {
+    console.warn("Magyx Bundle: could not cache free shipping marker variant id", cacheErrors);
+  }
+
+  return variantId;
+}
+
+/**
+ * The free-shipping Discount Function must be activated once per shop as an
+ * automatic app discount. Idempotent: does nothing if already activated.
+ * Fails softly (logs) when the function isn't deployed yet.
+ */
+async function ensureFreeShippingDiscountActivated(admin: AdminApiContext) {
+  try {
+    const existingResponse = await admin.graphql(`#graphql
+      query freeShippingDiscounts {
+        automaticDiscountNodes(first: 5, query: "title:'Magyx Bundle — Free Shipping Gift'") {
+          edges { node { id } }
+        }
+      }`);
+    const existing =
+      (await existingResponse.json()).data?.automaticDiscountNodes?.edges ?? [];
+    if (existing.length > 0) return;
+
+    const functionsResponse = await admin.graphql(`#graphql
+      query bundleFreeShippingFunctions {
+        shopifyFunctions(first: 25) {
+          edges { node { id title apiType } }
+        }
+      }`);
+    const functions =
+      (await functionsResponse.json()).data?.shopifyFunctions?.edges ?? [];
+    const fn = functions.find(
+      (edge: { node: { title: string } }) => edge.node.title === "Magyx Free Shipping",
+    )?.node;
+    if (!fn) {
+      console.warn(
+        "Magyx Bundle: free shipping function not found — deploy the app to install it.",
+      );
+      return;
+    }
+
+    const createResponse = await admin.graphql(
+      `#graphql
+      mutation activateFreeShippingDiscount($discount: DiscountAutomaticAppInput!) {
+        discountAutomaticAppCreate(automaticAppDiscount: $discount) {
+          automaticAppDiscount { discountId }
+          userErrors { field message }
+        }
+      }`,
+      {
+        variables: {
+          discount: {
+            title: "Magyx Bundle — Free Shipping Gift",
+            functionId: fn.id,
+            discountClasses: ["SHIPPING"],
+            startsAt: new Date().toISOString(),
+            combinesWith: {
+              orderDiscounts: true,
+              productDiscounts: true,
+              shippingDiscounts: true,
+            },
+          },
+        },
+      },
+    );
+    const errors =
+      (await createResponse.json()).data?.discountAutomaticAppCreate?.userErrors ?? [];
+    if (errors.length) {
+      console.warn("Magyx Bundle: discountAutomaticAppCreate errors", errors);
+    }
+  } catch (error) {
+    console.warn("Magyx Bundle: could not activate free shipping discount", error);
   }
 }
 
@@ -188,6 +384,7 @@ interface FixedBundlePublishInput {
     showPrices: boolean;
     itemSubtextTemplate: string;
     showSubtextOnGifts: boolean;
+    freeShipping: boolean;
   };
 }
 
@@ -417,6 +614,20 @@ export async function publishFixedBundleProduct(
   input: FixedBundlePublishInput,
   existingProductId?: string | null,
 ) {
+  // Free shipping is delivered the same way any other gift is: as a $0
+  // component. See ensureFreeShippingMarkerVariant for why a real (though
+  // hidden) product variant is needed rather than a flag on the bundle.
+  const componentVariantIds = input.widgetSettings.freeShipping
+    ? [
+        ...input.componentVariantIds,
+        {
+          variantId: await ensureFreeShippingMarkerVariant(admin),
+          quantity: 1,
+          isGift: true,
+        },
+      ]
+    : input.componentVariantIds;
+
   // Snapshot component prices so the Cart Transform function can price the
   // expanded components without a runtime lookup
   const priceResponse = await admin.graphql(
@@ -426,7 +637,7 @@ export async function publishFixedBundleProduct(
         ... on ProductVariant { id price }
       }
     }`,
-    { variables: { ids: input.componentVariantIds.map((c) => c.variantId) } },
+    { variables: { ids: componentVariantIds.map((c) => c.variantId) } },
   );
   const priceJson = await priceResponse.json();
   const priceByVariant = new Map<string, number>(
@@ -437,7 +648,7 @@ export async function publishFixedBundleProduct(
 
   // A component variant that no longer resolves means its product was deleted;
   // publishing anyway would ship a config the Cart Transform can't expand
-  const missingVariants = input.componentVariantIds.filter(
+  const missingVariants = componentVariantIds.filter(
     (c) => !priceByVariant.has(c.variantId),
   );
   if (missingVariants.length > 0) {
@@ -455,7 +666,7 @@ export async function publishFixedBundleProduct(
       .filter((i): i is typeof i & { variantId: string } => Boolean(i.variantId))
       .map((i) => [i.variantId, i.title]),
   );
-  const components = input.componentVariantIds.map((c) => ({
+  const components = componentVariantIds.map((c) => ({
     variantId: c.variantId,
     quantity: c.quantity,
     isGift: c.isGift ?? false,

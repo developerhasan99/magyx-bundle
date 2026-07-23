@@ -34,6 +34,8 @@ export interface BundleInput {
   showPrices: boolean;
   itemSubtextTemplate: string;
   showSubtextOnGifts: boolean;
+  // FIXED bundles: waives shipping at checkout when this bundle is bought
+  freeShipping: boolean;
   items: BundleItemInput[];
   rule?: {
     minItems: number;
@@ -74,6 +76,7 @@ export async function createBundle(shop: string, input: BundleInput) {
       showPrices: input.showPrices,
       itemSubtextTemplate: input.itemSubtextTemplate,
       showSubtextOnGifts: input.showSubtextOnGifts,
+      freeShipping: input.freeShipping,
       items: { create: input.items },
       rule: input.rule
         ? {
@@ -112,6 +115,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         showPrices: input.showPrices,
         itemSubtextTemplate: input.itemSubtextTemplate,
         showSubtextOnGifts: input.showSubtextOnGifts,
+        freeShipping: input.freeShipping,
         items: { create: input.items },
         rule: input.rule
           ? {

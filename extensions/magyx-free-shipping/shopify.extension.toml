@@ -1,0 +1,17 @@
+api_version = "2026-01"
+
+[[extensions]]
+name = "Magyx Free Shipping"
+handle = "magyx-free-shipping"
+uid = "c7a127ac-5a66-e727-71c6-a8113b23bdbb5fc306d2"
+type = "function"
+description = "Waives shipping when the cart contains a bundle whose merchant enabled free shipping as a gift."
+
+  [[extensions.targeting]]
+  target = "cart.delivery-options.discounts.generate.run"
+  input_query = "src/cart_delivery_options_discounts_generate_run.graphql"
+  export = "cart-delivery-options-discounts-generate-run"
+
+  [extensions.build]
+  command = ""
+  path = "dist/function.wasm"

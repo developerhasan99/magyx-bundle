@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs, SerializeFrom } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
 import { useFetcher, useLoaderData, useRevalidator } from "@remix-run/react";
@@ -164,6 +164,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       showPrices: bundle.showPrices,
       itemSubtextTemplate: bundle.itemSubtextTemplate,
       showSubtextOnGifts: bundle.showSubtextOnGifts,
+      freeShipping: bundle.freeShipping,
       items: bundle.items.map((i) => ({
         productId: i.productId,
         variantId: i.variantId,
@@ -266,6 +267,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             showPrices: bundle.showPrices,
             itemSubtextTemplate: bundle.itemSubtextTemplate,
             showSubtextOnGifts: bundle.showSubtextOnGifts,
+            freeShipping: bundle.freeShipping,
           },
         },
         bundle.shopifyProductId,
@@ -622,6 +624,7 @@ function formStateOf(bundle: LoaderBundle) {
     showPrices: bundle?.showPrices ?? false,
     itemSubtextTemplate: bundle?.itemSubtextTemplate ?? "",
     showSubtextOnGifts: bundle?.showSubtextOnGifts ?? true,
+    freeShipping: bundle?.freeShipping ?? false,
     items:
       bundle?.items.map((i): ItemState => ({
         productId: i.productId,
@@ -675,6 +678,7 @@ export default function BundleBuilder() {
   const [showSubtextOnGifts, setShowSubtextOnGifts] = useState(
     initialForm.showSubtextOnGifts,
   );
+  const [freeShipping, setFreeShipping] = useState(initialForm.freeShipping);
   const [items, setItems] = useState<ItemState[]>(initialForm.items);
   const [collections, setCollections] = useState<CollectionState[]>(
     initialForm.collections,
@@ -697,13 +701,13 @@ export default function BundleBuilder() {
       JSON.stringify({
         title, type, status, pricingType, pricingValue, widgetStyle,
         widgetHeading, accentColor, showPrices, itemSubtextTemplate,
-        showSubtextOnGifts, items, collections, poolSource, slotCount,
+        showSubtextOnGifts, freeShipping, items, collections, poolSource, slotCount,
         minItems, maxItems, tiers,
       }) !== JSON.stringify(initialForm),
     [
       initialForm, title, type, status, pricingType, pricingValue,
       widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
-      showSubtextOnGifts, items, collections, poolSource, slotCount,
+      showSubtextOnGifts, freeShipping, items, collections, poolSource, slotCount,
       minItems, maxItems, tiers,
     ],
   );
@@ -720,6 +724,7 @@ export default function BundleBuilder() {
     setShowPrices(initialForm.showPrices);
     setItemSubtextTemplate(initialForm.itemSubtextTemplate);
     setShowSubtextOnGifts(initialForm.showSubtextOnGifts);
+    setFreeShipping(initialForm.freeShipping);
     setItems(initialForm.items);
     setCollections(initialForm.collections);
     setPoolSource(initialForm.poolSource);
@@ -730,11 +735,19 @@ export default function BundleBuilder() {
   }, [initialForm]);
   const errors = fetcher.data && "errors" in fetcher.data ? fetcher.data.errors : null;
 
+  const lastHandledSaveRef = useRef<typeof fetcher.data | null>(null);
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data && "saved" in fetcher.data) {
+    if (
+      fetcher.state === "idle" &&
+      fetcher.data &&
+      "saved" in fetcher.data &&
+      fetcher.data !== lastHandledSaveRef.current
+    ) {
+      lastHandledSaveRef.current = fetcher.data;
       shopify.toast.show("Bundle saved");
+      revalidator.revalidate();
     }
-  }, [fetcher.state, fetcher.data, shopify]);
+  }, [fetcher.state, fetcher.data, shopify, revalidator]);
 
   const openResourcePicker = useCallback(async (isGiftFlag: boolean) => {
     // Fixed bundles are variant-level: preselect the exact variants so the
@@ -894,6 +907,7 @@ export default function BundleBuilder() {
       showPrices,
       itemSubtextTemplate,
       showSubtextOnGifts,
+      freeShipping,
       // price/missing are editor-only display state — the DB schema doesn't store them
       items: usesCollections
         ? []
@@ -928,7 +942,7 @@ export default function BundleBuilder() {
   }, [
     fetcher, title, description, type, status, pricingType, pricingValue,
     widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
-    showSubtextOnGifts, items, minItems, maxItems, tiers, poolSource,
+    showSubtextOnGifts, freeShipping, items, minItems, maxItems, tiers, poolSource,
     collections, slotCount,
   ]);
 
@@ -1279,6 +1293,12 @@ export default function BundleBuilder() {
                       Optional. These products are always included at $0
                       alongside the bundle — they don&apos;t affect its price.
                     </Text>
+                    <Checkbox
+                      label="Include free shipping as a gift"
+                      checked={freeShipping}
+                      onChange={setFreeShipping}
+                      helpText="Waives shipping at checkout when a customer buys this bundle."
+                    />
                     {giftItems.length === 0 ? (
                       <Box padding="400">
                         <Text as="p" tone="subdued" alignment="center">

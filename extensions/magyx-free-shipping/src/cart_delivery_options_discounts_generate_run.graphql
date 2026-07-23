@@ -1,0 +1,19 @@
+query RunInput {
+  cart {
+    deliveryGroups {
+      id
+    }
+    lines {
+      merchandise {
+        ... on ProductVariant {
+          freeShippingMarker: metafield(namespace: "$app:magyx-bundle", key: "free_shipping_marker") {
+            value
+          }
+        }
+      }
+    }
+  }
+  discount {
+    discountClasses
+  }
+}

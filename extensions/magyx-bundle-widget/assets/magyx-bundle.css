@@ -498,6 +498,31 @@
   margin: 0;
 }
 
+/* ---------- Free gifts: always a grid, regardless of the main list style ---------- */
+.magyx-bundle-contents__heading--gifts {
+  margin-top: 22px;
+}
+
+.magyx-bundle-contents__grid--gifts {
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+}
+
+.magyx-bundle-contents__tile-shipping-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1;
+  background: var(--bc-accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 12px;
+}
+
 @media (max-width: 480px) {
   .magyx-bundle-contents__grid {
     grid-template-columns: repeat(2, 1fr);
