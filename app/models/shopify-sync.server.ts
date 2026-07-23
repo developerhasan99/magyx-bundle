@@ -187,6 +187,7 @@ interface FixedBundlePublishInput {
     accentColor: string;
     showPrices: boolean;
     itemSubtextTemplate: string;
+    showSubtextOnGifts: boolean;
   };
 }
 
@@ -268,25 +269,15 @@ async function fetchItemSubtexts(
   template: string,
 ): Promise<Map<string, string>> {
   const metafieldRefs = extractMetafieldRefs(template);
+  const plainRefs = metafieldRefs.filter((ref) => !ref.field);
+  const metaobjectRefs = metafieldRefs.filter((ref) => ref.field);
   const productIds = Array.from(new Set(items.map((i) => i.productId)));
   const variantIds = items
     .map((i) => i.variantId)
     .filter((id): id is string => Boolean(id));
 
-  // Metaobject references can be single (`reference`) or list-typed
-  // (`references`) — query both and prefer whichever comes back, so the same
-  // {{metafield:ns.key.value.field}} syntax works for either field type.
-  const metafieldFragment = metafieldRefs
-    .map((ref, i) =>
-      ref.field
-        ? `mf${i}: metafield(namespace: "${ref.namespace}", key: "${ref.key}") {
-             reference { ... on Metaobject { field(key: "${ref.field}") { value } } }
-             references(first: 1) {
-               nodes { ... on Metaobject { field(key: "${ref.field}") { value } } }
-             }
-           }`
-        : `mf${i}: metafield(namespace: "${ref.namespace}", key: "${ref.key}") { value }`,
-    )
+  const plainFragment = plainRefs
+    .map((ref, i) => `mf${i}: metafield(namespace: "${ref.namespace}", key: "${ref.key}") { value }`)
     .join("\n");
 
   const response = await admin.graphql(
@@ -297,7 +288,7 @@ async function fetchItemSubtexts(
           id
           vendor
           productType
-          ${metafieldFragment}
+          ${plainFragment}
         }
       }
       variants: nodes(ids: $variantIds) {
@@ -316,6 +307,12 @@ async function fetchItemSubtexts(
     { variables: { productIds, variantIds } },
   );
   const json = await response.json();
+  if ((json as { errors?: unknown }).errors) {
+    console.warn(
+      "Magyx Bundle: item subtext base query errors",
+      JSON.stringify((json as { errors?: unknown }).errors),
+    );
+  }
   const productById = new Map<string, Record<string, unknown>>(
     ((json.data?.products ?? []) as (Record<string, unknown> | null)[])
       .filter((p): p is Record<string, unknown> => Boolean(p))
@@ -327,26 +324,70 @@ async function fetchItemSubtexts(
       .map((v) => [v.id as string, v]),
   );
 
+  // Kept in its own request: metaobject reference lookups are more likely to
+  // hit a schema/argument edge case (e.g. a field key that doesn't exist on
+  // that metaobject definition), and a failure here shouldn't blank out the
+  // sku/vendor/plain-metafield placeholders resolved above.
+  const metaobjectById = new Map<string, Record<string, unknown>>();
+  if (metaobjectRefs.length > 0) {
+    try {
+      const metaobjectFragment = metaobjectRefs
+        .map(
+          (ref, i) => `mf${i}: metafield(namespace: "${ref.namespace}", key: "${ref.key}") {
+             reference { ... on Metaobject { field(key: "${ref.field}") { value } } }
+             references(first: 1) {
+               nodes { ... on Metaobject { field(key: "${ref.field}") { value } } }
+             }
+           }`,
+        )
+        .join("\n");
+      const moResponse = await admin.graphql(
+        `#graphql
+        query bundleItemSubtextMetaobjectDetails($productIds: [ID!]!) {
+          products: nodes(ids: $productIds) {
+            ... on Product {
+              id
+              ${metaobjectFragment}
+            }
+          }
+        }`,
+        { variables: { productIds } },
+      );
+      const moJson = await moResponse.json();
+      if ((moJson as { errors?: unknown }).errors) {
+        console.warn(
+          "Magyx Bundle: item subtext metaobject query errors — check that each {{metafield:ns.key.value.field}} field key exists on the referenced metaobject definition",
+          JSON.stringify((moJson as { errors?: unknown }).errors),
+        );
+      }
+      ((moJson.data?.products ?? []) as (Record<string, unknown> | null)[])
+        .filter((p): p is Record<string, unknown> => Boolean(p))
+        .forEach((p) => metaobjectById.set(p.id as string, p));
+    } catch (error) {
+      console.warn("Magyx Bundle: could not resolve metaobject reference fields", error);
+    }
+  }
+
   const subtextByKey = new Map<string, string>();
   for (const item of items) {
     const product = productById.get(item.productId);
+    const metaobjectProduct = metaobjectById.get(item.productId);
     const variant = item.variantId ? variantById.get(item.variantId) : undefined;
     const metafields: Record<string, string | null> = {};
-    metafieldRefs.forEach((ref, i) => {
-      if (ref.field) {
-        const mf = product?.[`mf${i}`] as
-          | {
-              reference?: { field?: { value?: string } | null } | null;
-              references?: { nodes?: { field?: { value?: string } | null }[] } | null;
-            }
-          | null
-          | undefined;
-        metafields[metafieldRefMapKey(ref)] =
-          mf?.reference?.field?.value ?? mf?.references?.nodes?.[0]?.field?.value ?? null;
-      } else {
-        const mf = product?.[`mf${i}`] as { value?: string } | null | undefined;
-        metafields[metafieldRefMapKey(ref)] = mf?.value ?? null;
-      }
+    plainRefs.forEach((ref, i) => {
+      const mf = product?.[`mf${i}`] as { value?: string } | null | undefined;
+      metafields[metafieldRefMapKey(ref)] = mf?.value ?? null;
+    });
+    metaobjectRefs.forEach((ref, i) => {
+      const mf = metaobjectProduct?.[`mf${i}`] as
+        | {
+            reference?: { field?: { value?: string } | null } | null;
+            references?: { nodes?: { field?: { value?: string } | null }[] } | null;
+          }
+        | null
+        | undefined;
+      metafields[metafieldRefMapKey(ref)] =
+        mf?.reference?.field?.value ?? mf?.references?.nodes?.[0]?.field?.value ?? null;
     });
     const weight = (
       variant?.inventoryItem as
@@ -552,7 +593,10 @@ export async function publishFixedBundleProduct(
         quantity: item.quantity,
         price: item.variantId ? (priceByVariant.get(item.variantId) ?? null) : null,
         isGift: item.isGift ?? false,
-        subtext: subtextByKey?.get(item.variantId ?? item.productId) || null,
+        subtext:
+          item.isGift && !input.widgetSettings.showSubtextOnGifts
+            ? null
+            : subtextByKey?.get(item.variantId ?? item.productId) || null,
       })),
     };
     const displayResponse = await admin.graphql(

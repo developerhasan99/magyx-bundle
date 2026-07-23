@@ -33,6 +33,7 @@ export interface BundleInput {
   accentColor: string;
   showPrices: boolean;
   itemSubtextTemplate: string;
+  showSubtextOnGifts: boolean;
   items: BundleItemInput[];
   rule?: {
     minItems: number;
@@ -72,6 +73,7 @@ export async function createBundle(shop: string, input: BundleInput) {
       accentColor: input.accentColor,
       showPrices: input.showPrices,
       itemSubtextTemplate: input.itemSubtextTemplate,
+      showSubtextOnGifts: input.showSubtextOnGifts,
       items: { create: input.items },
       rule: input.rule
         ? {
@@ -109,6 +111,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         accentColor: input.accentColor,
         showPrices: input.showPrices,
         itemSubtextTemplate: input.itemSubtextTemplate,
+        showSubtextOnGifts: input.showSubtextOnGifts,
         items: { create: input.items },
         rule: input.rule
           ? {

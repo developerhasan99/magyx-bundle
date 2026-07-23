@@ -30,6 +30,7 @@ model Bundle {
   // Plain text + {{sku}}/{{vendor}}/{{type}}/{{barcode}}/{{weight}}/{{metafield:ns.key}}
   // placeholders, resolved per-item and rendered under each product's title
   itemSubtextTemplate String   @default("")
+  showSubtextOnGifts  Boolean  @default(true)
   items           BundleItem[]
   rule            BundleRule?
   createdAt       DateTime     @default(now())
