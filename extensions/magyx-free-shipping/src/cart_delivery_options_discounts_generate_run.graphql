@@ -4,8 +4,13 @@ query RunInput {
       id
     }
     lines {
-      attribute(key: "_magyx_free_shipping") {
-        value
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          components: metafield(namespace: "$app:magyx-bundle", key: "components") {
+            value
+          }
+        }
       }
     }
   }

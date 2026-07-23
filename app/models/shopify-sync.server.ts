@@ -134,12 +134,12 @@ async function ensureFreeShippingDiscountActivated(admin: AdminApiContext) {
   try {
     const existingResponse = await admin.graphql(`#graphql
       query freeShippingDiscounts {
-        automaticDiscountNodes(first: 5, query: "title:'Magyx Bundle — Free Shipping Gift'") {
+        discountNodes(first: 5, query: "title:'Magyx Bundle — Free Shipping Gift'") {
           edges { node { id } }
         }
       }`);
     const existing =
-      (await existingResponse.json()).data?.automaticDiscountNodes?.edges ?? [];
+      (await existingResponse.json()).data?.discountNodes?.edges ?? [];
     if (existing.length > 0) return;
 
     const functionsResponse = await admin.graphql(`#graphql
