@@ -3,11 +3,12 @@
 /**
  * Magyx Free Shipping
  *
- * Waives shipping whenever the cart contains the shop's shared $0 "Free
- * Shipping" marker variant — silently included as a gift component by any
- * bundle with free shipping enabled (see ensureFreeShippingMarkerVariant in
- * app/models/shopify-sync.server.ts). The marker's mere presence is enough;
- * there's no need to know which bundle it came from.
+ * Waives shipping whenever the cart contains a line stamped with the
+ * `_magyx_free_shipping` attribute — set by the bundle-pricing Cart Transform
+ * function on a bundle's expanded lines when the bundle has free shipping
+ * enabled (see buildExpandOperation in extensions/bundle-pricing/src/run.js).
+ * The attribute's mere presence is enough; there's no need to know which
+ * bundle it came from.
  */
 
 const NO_CHANGES = { operations: [] };
@@ -15,10 +16,10 @@ const NO_CHANGES = { operations: [] };
 export function cartDeliveryOptionsDiscountsGenerateRun(input) {
   if (!input.discount.discountClasses.includes("SHIPPING")) return NO_CHANGES;
 
-  const hasFreeShippingMarker = input.cart.lines.some(
-    (line) => line.merchandise?.freeShippingMarker?.value === "true",
+  const hasFreeShippingAttribute = input.cart.lines.some(
+    (line) => line.attribute?.value === "true",
   );
-  if (!hasFreeShippingMarker) return NO_CHANGES;
+  if (!hasFreeShippingAttribute) return NO_CHANGES;
 
   const deliveryGroups = input.cart.deliveryGroups;
   if (deliveryGroups.length === 0) return NO_CHANGES;

@@ -36,6 +36,14 @@ function buildExpandOperation(line, componentsValue) {
   const components = data?.components;
   if (!Array.isArray(components) || components.length === 0) return null;
 
+  // Bundles with free shipping enabled stamp this attribute onto their first
+  // expanded line so the magyx-free-shipping Discount Function can detect it
+  // — a Discount Function only ever sees the expanded lines, not the parent
+  // bundle line, so there's no other way to carry this through.
+  const freeShippingAttributes = data?.freeShipping
+    ? [{ key: "_magyx_free_shipping", value: "true" }]
+    : [];
+
   const priced = components.filter((c) => !c.isGift);
   const gifts = components.filter((c) => c.isGift);
 
@@ -74,6 +82,7 @@ function buildExpandOperation(line, componentsValue) {
           fixedPricePerUnit: { amount: perUnit.toFixed(2) },
         },
       },
+      attributes: i === 0 ? freeShippingAttributes : undefined,
     });
   }
 
