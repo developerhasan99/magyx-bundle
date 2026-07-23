@@ -1,14 +1,36 @@
-{%- assign bundle_items = product.metafields.magyx_bundle.components.value -%}
+{%- comment -%}
+  Every editable option for this widget (style, heading, accent color, show
+  prices) is set from the Magyx Bundle app admin, not the theme editor — this
+  block intentionally has no schema settings. It reads the fully-resolved
+  config straight off the product's display metafield.
+{%- endcomment -%}
+{%- assign bundle_data = product.metafields.magyx_bundle.components.value -%}
+{%- comment -%}
+  Bundles published before per-bundle appearance settings existed wrote this
+  metafield as a bare array of items. Fall back to that shape (with default
+  settings) so older bundles don't go blank until they're re-saved.
+{%- endcomment -%}
+{%- if bundle_data.items -%}
+  {%- assign bundle_items = bundle_data.items -%}
+  {%- assign settings = bundle_data.settings -%}
+{%- else -%}
+  {%- assign bundle_items = bundle_data -%}
+  {%- assign settings = blank -%}
+{%- endif -%}
 {%- if bundle_items and bundle_items.size > 0 -%}
+  {%- assign style = settings.style | default: "numbered" -%}
+  {%- assign heading = settings.heading -%}
+  {%- assign accent = settings.accentColor | default: "#1a1a1a" -%}
+  {%- assign show_prices = settings.showPrices -%}
   <div
-    class="magyx-bundle-contents"
-    style="--bc-accent: {{ block.settings.accent_color }};"
+    class="magyx-bundle-contents magyx-bundle-contents--{{ style }}"
+    style="--bc-accent: {{ accent }};"
     {{ block.shopify_attributes }}
   >
     {%- comment -%}
-      Consumed by magyx-bundle-fixed.js to stamp "Item N" line-item properties
-      onto the bundle's own cart line at add-to-cart time, so the properties
-      show up on the parent bundle line rather than on its expanded children.
+      Consumed by magyx-bundle-fixed.js to stamp "Item N" properties onto the
+      bundle's own cart line at add-to-cart time, so the properties show up
+      on the parent bundle line rather than on its expanded children.
     {%- endcomment -%}
     <script type="application/json" data-magyx-bundle-data>
       {
@@ -20,40 +42,108 @@
         ]
       }
     </script>
-    {%- if block.settings.heading != blank -%}
-      <p class="magyx-bundle-contents__heading">{{ block.settings.heading }}</p>
+    {%- if heading != blank -%}
+      <p class="magyx-bundle-contents__heading">{{ heading }}</p>
     {%- endif -%}
-    <div class="magyx-bundle-contents__list">
-      {%- for item in bundle_items -%}
-        <div class="magyx-bundle-contents__item">
-          <span class="magyx-bundle-contents__num">{{ forloop.index }}</span>
-          {%- if item.imageUrl -%}
-            <img
-              class="magyx-bundle-contents__image"
-              src="{{ item.imageUrl }}"
-              alt="{{ item.title | escape }}"
-              loading="lazy"
-              width="64"
-              height="64"
-            >
-          {%- else -%}
-            <span class="magyx-bundle-contents__image magyx-bundle-contents__image--placeholder"></span>
-          {%- endif -%}
-          <div class="magyx-bundle-contents__info">
-            <p class="magyx-bundle-contents__title">
-              {%- if item.quantity > 1 -%}{{ item.quantity }} × {% endif -%}
-              {{- item.title -}}
-            </p>
-            {%- if item.isGift -%}
-              <span class="magyx-bundle-contents__gift-badge">Free gift</span>
-            {%- elsif block.settings.show_prices and item.price -%}
-              {%- assign item_cents = item.price | times: 100 | round -%}
-              <p class="magyx-bundle-contents__price">{{ item_cents | money }}</p>
-            {%- endif -%}
-          </div>
+
+    {%- case style -%}
+      {%- when "grid" -%}
+        <div class="magyx-bundle-contents__grid">
+          {%- for item in bundle_items -%}
+            <div class="magyx-bundle-contents__tile">
+              <div class="magyx-bundle-contents__tile-image-wrap">
+                {%- if item.imageUrl -%}
+                  <img
+                    class="magyx-bundle-contents__tile-image"
+                    src="{{ item.imageUrl }}"
+                    alt="{{ item.title | escape }}"
+                    loading="lazy"
+                    width="120"
+                    height="120"
+                  >
+                {%- else -%}
+                  <span class="magyx-bundle-contents__tile-image magyx-bundle-contents__image--placeholder"></span>
+                {%- endif -%}
+                {%- if item.isGift -%}
+                  <span class="magyx-bundle-contents__tile-gift-badge">Free gift</span>
+                {%- endif -%}
+                {%- if item.quantity > 1 -%}
+                  <span class="magyx-bundle-contents__tile-qty">×{{ item.quantity }}</span>
+                {%- endif -%}
+              </div>
+              <p class="magyx-bundle-contents__tile-title">{{ item.title }}</p>
+              {%- if show_prices and item.price -%}
+                {%- assign item_cents = item.price | times: 100 | round -%}
+                <p class="magyx-bundle-contents__tile-price">{{ item_cents | money }}</p>
+              {%- endif -%}
+            </div>
+          {%- endfor -%}
         </div>
-      {%- endfor -%}
-    </div>
+
+      {%- when "minimal" -%}
+        <div class="magyx-bundle-contents__rows">
+          {%- for item in bundle_items -%}
+            <div class="magyx-bundle-contents__row">
+              <span class="magyx-bundle-contents__check" aria-hidden="true"></span>
+              {%- if item.imageUrl -%}
+                <img
+                  class="magyx-bundle-contents__row-image"
+                  src="{{ item.imageUrl }}"
+                  alt="{{ item.title | escape }}"
+                  loading="lazy"
+                  width="36"
+                  height="36"
+                >
+              {%- else -%}
+                <span class="magyx-bundle-contents__row-image magyx-bundle-contents__image--placeholder"></span>
+              {%- endif -%}
+              <span class="magyx-bundle-contents__row-title">
+                {%- if item.quantity > 1 -%}{{ item.quantity }} × {% endif -%}
+                {{- item.title -}}
+              </span>
+              {%- if item.isGift -%}
+                <span class="magyx-bundle-contents__gift-badge magyx-bundle-contents__gift-badge--sm">Free gift</span>
+              {%- elsif show_prices and item.price -%}
+                {%- assign item_cents = item.price | times: 100 | round -%}
+                <span class="magyx-bundle-contents__row-price">{{ item_cents | money }}</span>
+              {%- endif -%}
+            </div>
+          {%- endfor -%}
+        </div>
+
+      {%- else -%}
+        <div class="magyx-bundle-contents__list">
+          {%- for item in bundle_items -%}
+            <div class="magyx-bundle-contents__item">
+              <span class="magyx-bundle-contents__num">{{ forloop.index }}</span>
+              {%- if item.imageUrl -%}
+                <img
+                  class="magyx-bundle-contents__image"
+                  src="{{ item.imageUrl }}"
+                  alt="{{ item.title | escape }}"
+                  loading="lazy"
+                  width="64"
+                  height="64"
+                >
+              {%- else -%}
+                <span class="magyx-bundle-contents__image magyx-bundle-contents__image--placeholder"></span>
+              {%- endif -%}
+              <div class="magyx-bundle-contents__info">
+                <p class="magyx-bundle-contents__title">
+                  {%- if item.quantity > 1 -%}{{ item.quantity }} × {% endif -%}
+                  {{- item.title -}}
+                </p>
+                {%- if item.isGift -%}
+                  <span class="magyx-bundle-contents__gift-badge">Free gift</span>
+                {%- elsif show_prices and item.price -%}
+                  {%- assign item_cents = item.price | times: 100 | round -%}
+                  <p class="magyx-bundle-contents__price">{{ item_cents | money }}</p>
+                {%- endif -%}
+              </div>
+            </div>
+          {%- endfor -%}
+        </div>
+    {%- endcase -%}
   </div>
 {%- endif -%}
 
@@ -63,25 +153,6 @@
   "target": "section",
   "stylesheet": "magyx-bundle.css",
   "javascript": "magyx-bundle-fixed.js",
-  "settings": [
-    {
-      "type": "text",
-      "id": "heading",
-      "label": "Heading",
-      "default": "What's inside"
-    },
-    {
-      "type": "checkbox",
-      "id": "show_prices",
-      "label": "Show item prices",
-      "default": false
-    },
-    {
-      "type": "color",
-      "id": "accent_color",
-      "label": "Accent color",
-      "default": "#1a1a1a"
-    }
-  ]
+  "settings": []
 }
 {% endschema %}

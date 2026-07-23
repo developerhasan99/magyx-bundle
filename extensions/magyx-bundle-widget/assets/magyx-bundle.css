@@ -222,37 +222,69 @@
   }
 }
 
-/* Bundle Contents block — numbered component cards for fixed bundles */
+/* Bundle Contents block — the storefront "what's inside" widget.
+   Style (numbered / grid / minimal), heading, accent color and show-prices
+   are all resolved server-side from the app admin and passed in as a
+   modifier class + CSS custom property — there's nothing to theme here. */
 .magyx-bundle-contents {
   --bc-accent: #1a1a1a;
-  --bc-radius: 12px;
-  --bc-border: #e3e3e3;
-  margin: 16px 0;
+  --bc-radius: 14px;
+  --bc-border: #e7e5e2;
+  margin: 24px 0;
 }
 
 .magyx-bundle-contents__heading {
+  font-size: 0.78em;
   font-weight: 700;
-  margin: 0 0 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin: 0 0 14px;
 }
 
-.magyx-bundle-contents__list {
+.magyx-bundle-contents__image--placeholder {
+  background: #f1efec;
+}
+
+.magyx-bundle-contents__gift-badge {
+  display: inline-block;
+  margin: 4px 0 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--bc-accent);
+  color: #fff;
+  font-size: 0.74em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* ---------- Numbered: rows with a small accent-colored index badge ---------- */
+.magyx-bundle-contents--numbered .magyx-bundle-contents__list {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.magyx-bundle-contents__item {
+.magyx-bundle-contents--numbered .magyx-bundle-contents__item {
   position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
-  border: 1.5px solid var(--bc-accent);
+  border: 1px solid var(--bc-border);
   border-radius: var(--bc-radius);
-  padding: 10px 14px 10px 20px;
+  padding: 12px 16px 12px 24px;
   background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
-.magyx-bundle-contents__num {
+.magyx-bundle-contents--numbered .magyx-bundle-contents__item:hover {
+  border-color: var(--bc-accent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+.magyx-bundle-contents--numbered .magyx-bundle-contents__num {
   position: absolute;
   top: 50%;
   left: 0;
@@ -262,50 +294,186 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--bc-accent);
   color: #fff;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.magyx-bundle-contents--numbered .magyx-bundle-contents__image {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.magyx-bundle-contents--numbered .magyx-bundle-contents__info {
+  min-width: 0;
+}
+
+.magyx-bundle-contents--numbered .magyx-bundle-contents__title {
+  font-weight: 600;
+  margin: 0;
+}
+
+.magyx-bundle-contents--numbered .magyx-bundle-contents__price {
+  margin: 3px 0 0;
+  opacity: 0.65;
+  font-size: 0.88em;
+}
+
+/* ---------- Grid: image-forward tiles, like a mini product grid ---------- */
+.magyx-bundle-contents__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 16px;
+}
+
+.magyx-bundle-contents__tile {
+  text-align: center;
+}
+
+.magyx-bundle-contents__tile-image-wrap {
+  position: relative;
+  margin-bottom: 8px;
+  border-radius: var(--bc-radius);
+  overflow: hidden;
+  border: 1px solid var(--bc-border);
+  transition: box-shadow 0.15s ease;
+}
+
+.magyx-bundle-contents__tile:hover .magyx-bundle-contents__tile-image-wrap {
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+}
+
+.magyx-bundle-contents__tile-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  transition: transform 0.2s ease;
+}
+
+.magyx-bundle-contents__tile:hover .magyx-bundle-contents__tile-image {
+  transform: scale(1.04);
+}
+
+.magyx-bundle-contents__tile-qty {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bc-accent);
+  color: #fff;
+  font-size: 0.72em;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.magyx-bundle-contents__tile-gift-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--bc-accent);
+  color: #fff;
+  font-size: 0.68em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.magyx-bundle-contents__tile-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.9em;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.magyx-bundle-contents__tile-price {
+  margin: 3px 0 0;
+  opacity: 0.65;
+  font-size: 0.85em;
+}
+
+/* ---------- Minimal: compact checklist rows, no boxes ---------- */
+.magyx-bundle-contents__rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.magyx-bundle-contents__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--bc-border);
+}
+
+.magyx-bundle-contents__row:last-child {
+  border-bottom: none;
+}
+
+.magyx-bundle-contents__check {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bc-accent);
+  color: #fff;
+  font-size: 11px;
   line-height: 1;
 }
 
-.magyx-bundle-contents__image {
-  width: 56px;
-  height: 56px;
+.magyx-bundle-contents__check::before {
+  content: "✓";
+}
+
+.magyx-bundle-contents__row-image {
+  width: 36px;
+  height: 36px;
   object-fit: cover;
   border-radius: 8px;
   flex-shrink: 0;
 }
 
-.magyx-bundle-contents__image--placeholder {
-  background: #f0f0f0;
-}
-
-.magyx-bundle-contents__info {
+.magyx-bundle-contents__row-title {
+  flex: 1;
   min-width: 0;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.magyx-bundle-contents__title {
-  font-weight: 600;
+.magyx-bundle-contents__row-price {
+  flex-shrink: 0;
+  opacity: 0.65;
+  font-size: 0.88em;
+}
+
+.magyx-bundle-contents__gift-badge--sm {
+  flex-shrink: 0;
   margin: 0;
 }
 
-.magyx-bundle-contents__price {
-  margin: 2px 0 0;
-  opacity: 0.7;
-  font-size: 0.9em;
-}
-
-.magyx-bundle-contents__gift-badge {
-  display: inline-block;
-  margin: 2px 0 0;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--bc-accent);
-  color: #fff;
-  font-size: 0.78em;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+@media (max-width: 480px) {
+  .magyx-bundle-contents__grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }

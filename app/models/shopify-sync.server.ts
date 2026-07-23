@@ -178,6 +178,14 @@ interface FixedBundlePublishInput {
     variantId: string | null;
     isGift?: boolean;
   }[];
+  // Appearance of the storefront "what's inside" widget — set entirely from
+  // the app admin, the theme block has no editable settings of its own
+  widgetSettings: {
+    style: string;
+    heading: string;
+    accentColor: string;
+    showPrices: boolean;
+  };
 }
 
 /**
@@ -348,13 +356,16 @@ export async function publishFixedBundleProduct(
   // block Liquid can read it; checkout truth stays in the variant metafield.
   // Soft-fails: a broken storefront card list shouldn't block saving.
   try {
-    const displayValue = input.displayItems.map((item) => ({
-      title: item.title,
-      imageUrl: item.imageUrl,
-      quantity: item.quantity,
-      price: item.variantId ? (priceByVariant.get(item.variantId) ?? null) : null,
-      isGift: item.isGift ?? false,
-    }));
+    const displayValue = {
+      settings: input.widgetSettings,
+      items: input.displayItems.map((item) => ({
+        title: item.title,
+        imageUrl: item.imageUrl,
+        quantity: item.quantity,
+        price: item.variantId ? (priceByVariant.get(item.variantId) ?? null) : null,
+        isGift: item.isGift ?? false,
+      })),
+    };
     const displayResponse = await admin.graphql(
       `#graphql
       mutation setBundleDisplayMetafield($metafields: [MetafieldsSetInput!]!) {

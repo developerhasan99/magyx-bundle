@@ -3,6 +3,7 @@ import prisma from "../db.server";
 export type BundleType = "FIXED" | "SLOT_BUILDER" | "MIX_MATCH";
 export type BundleStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 export type PricingType = "FIXED_PRICE" | "PERCENT_OFF" | "AMOUNT_OFF";
+export type WidgetStyle = "numbered" | "grid" | "minimal";
 
 export interface DiscountTier {
   quantity: number;
@@ -26,6 +27,11 @@ export interface BundleInput {
   status: BundleStatus;
   pricingType: PricingType;
   pricingValue: number;
+  // Storefront "what's inside" widget appearance (FIXED bundles only)
+  widgetStyle: WidgetStyle;
+  widgetHeading: string;
+  accentColor: string;
+  showPrices: boolean;
   items: BundleItemInput[];
   rule?: {
     minItems: number;
@@ -60,6 +66,10 @@ export async function createBundle(shop: string, input: BundleInput) {
       status: input.status,
       pricingType: input.pricingType,
       pricingValue: input.pricingValue,
+      widgetStyle: input.widgetStyle,
+      widgetHeading: input.widgetHeading,
+      accentColor: input.accentColor,
+      showPrices: input.showPrices,
       items: { create: input.items },
       rule: input.rule
         ? {
@@ -92,6 +102,10 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         status: input.status,
         pricingType: input.pricingType,
         pricingValue: input.pricingValue,
+        widgetStyle: input.widgetStyle,
+        widgetHeading: input.widgetHeading,
+        accentColor: input.accentColor,
+        showPrices: input.showPrices,
         items: { create: input.items },
         rule: input.rule
           ? {

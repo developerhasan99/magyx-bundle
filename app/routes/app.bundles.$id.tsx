@@ -18,6 +18,8 @@ import {
   Badge,
   Divider,
   Box,
+  Checkbox,
+  InlineGrid,
 } from "@shopify/polaris";
 import { DeleteIcon, EditIcon, ImageIcon, PlusIcon } from "@shopify/polaris-icons";
 import { SaveBar, TitleBar, useAppBridge } from "@shopify/app-bridge-react";
@@ -156,6 +158,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       pricingType: bundle.pricingType,
       pricingValue: bundle.pricingValue,
       shopifyProductId: bundle.shopifyProductId,
+      widgetStyle: bundle.widgetStyle,
+      widgetHeading: bundle.widgetHeading,
+      accentColor: bundle.accentColor,
+      showPrices: bundle.showPrices,
       items: bundle.items.map((i) => ({
         productId: i.productId,
         variantId: i.variantId,
@@ -250,6 +256,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             variantId: i.variantId,
             isGift: i.isGift,
           })),
+          widgetSettings: {
+            style: bundle.widgetStyle,
+            heading: bundle.widgetHeading,
+            accentColor: bundle.accentColor,
+            showPrices: bundle.showPrices,
+          },
         },
         bundle.shopifyProductId,
       );
@@ -373,6 +385,201 @@ function BundleTypeCard({
   );
 }
 
+const WIDGET_STYLE_OPTIONS = [
+  {
+    value: "numbered",
+    label: "Numbered",
+    description: "Numbered badge on each item, in clean rows.",
+  },
+  {
+    value: "grid",
+    label: "Grid",
+    description: "Image-forward tiles in a responsive grid.",
+  },
+  {
+    value: "minimal",
+    label: "Minimal",
+    description: "Compact checklist with small thumbnails.",
+  },
+] as const;
+
+// Miniature mockup of each storefront widget style, so merchants can see the
+// shape of the layout (and how their accent color reads) before saving.
+function WidgetStylePreview({
+  style,
+  accent,
+}: {
+  style: (typeof WIDGET_STYLE_OPTIONS)[number]["value"];
+  accent: string;
+}) {
+  if (style === "grid") {
+    return (
+      <InlineStack gap="150">
+        {[0, 1, 2].map((i) => (
+          <div key={i} style={{ flex: 1 }}>
+            <div
+              style={{
+                aspectRatio: "1",
+                borderRadius: 6,
+                background: "#e7e7e7",
+                marginBottom: 4,
+              }}
+            />
+            <div
+              style={{
+                height: 5,
+                borderRadius: 3,
+                background: "#dcdcdc",
+                marginBottom: 3,
+              }}
+            />
+            <div style={{ height: 5, width: "55%", borderRadius: 3, background: accent }} />
+          </div>
+        ))}
+      </InlineStack>
+    );
+  }
+
+  if (style === "minimal") {
+    return (
+      <BlockStack gap="150">
+        {[0, 1, 2].map((i) => (
+          <InlineStack key={i} gap="150" blockAlign="center" wrap={false}>
+            <div
+              style={{
+                width: 14,
+                height: 14,
+                flexShrink: 0,
+                borderRadius: "50%",
+                background: accent,
+                color: "#fff",
+                fontSize: 9,
+                lineHeight: "14px",
+                textAlign: "center",
+              }}
+            >
+              ✓
+            </div>
+            <div
+              style={{
+                width: 20,
+                height: 20,
+                flexShrink: 0,
+                borderRadius: 5,
+                background: "#e7e7e7",
+              }}
+            />
+            <div style={{ flex: 1, height: 5, borderRadius: 3, background: "#dcdcdc" }} />
+          </InlineStack>
+        ))}
+      </BlockStack>
+    );
+  }
+
+  return (
+    <BlockStack gap="150">
+      {[0, 1, 2].map((i) => (
+        <InlineStack key={i} gap="150" blockAlign="center" wrap={false}>
+          <div style={{ position: "relative", flexShrink: 0, width: 26, height: 26 }}>
+            <div
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 7,
+                background: "#e7e7e7",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                top: -4,
+                left: -4,
+                width: 13,
+                height: 13,
+                borderRadius: 4,
+                background: accent,
+                color: "#fff",
+                fontSize: 8,
+                fontWeight: 700,
+                lineHeight: "13px",
+                textAlign: "center",
+              }}
+            >
+              {i + 1}
+            </div>
+          </div>
+          <div style={{ flex: 1, height: 5, borderRadius: 3, background: "#dcdcdc" }} />
+        </InlineStack>
+      ))}
+    </BlockStack>
+  );
+}
+
+function WidgetStyleCard({
+  label,
+  description,
+  style,
+  accent,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  description: string;
+  style: (typeof WIDGET_STYLE_OPTIONS)[number]["value"];
+  accent: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "stretch",
+        textAlign: "left",
+        color: "var(--p-color-text)",
+        padding: "var(--p-space-300)",
+        borderRadius: "var(--p-border-radius-300)",
+        border: selected
+          ? "2px solid var(--p-color-border-emphasis)"
+          : "1px solid var(--p-color-border)",
+        margin: selected ? 0 : 1,
+        background: selected
+          ? "var(--p-color-bg-surface-selected)"
+          : "var(--p-color-bg-surface)",
+        cursor: "pointer",
+        transition: "border-color 100ms ease, background 100ms ease",
+      }}
+    >
+      <BlockStack gap="300">
+        <Box
+          background="bg-surface"
+          borderRadius="200"
+          borderColor="border"
+          borderWidth="025"
+          padding="300"
+        >
+          <WidgetStylePreview style={style} accent={accent} />
+        </Box>
+        <BlockStack gap="100">
+          <InlineStack gap="200" blockAlign="center" wrap={false}>
+            <RadioIndicator selected={selected} />
+            <Text as="span" variant="bodyMd" fontWeight="semibold">
+              {label}
+            </Text>
+          </InlineStack>
+          <Text as="span" variant="bodySm" tone="subdued">
+            {description}
+          </Text>
+        </BlockStack>
+      </BlockStack>
+    </button>
+  );
+}
+
 function RadioIndicator({ selected }: { selected: boolean }) {
   return (
     <span
@@ -404,6 +611,10 @@ function formStateOf(bundle: LoaderBundle) {
     pricingType:
       bundle?.pricingType ?? (bundle?.type === "MIX_MATCH" ? "PERCENT_OFF" : "FIXED_PRICE"),
     pricingValue: String(bundle?.pricingValue ?? ""),
+    widgetStyle: bundle?.widgetStyle ?? "numbered",
+    widgetHeading: bundle?.widgetHeading ?? "What's inside",
+    accentColor: bundle?.accentColor ?? "#1a1a1a",
+    showPrices: bundle?.showPrices ?? false,
     items:
       bundle?.items.map((i): ItemState => ({
         productId: i.productId,
@@ -447,6 +658,10 @@ export default function BundleBuilder() {
   const [status, setStatus] = useState<string>(initialForm.status);
   const [pricingType, setPricingType] = useState<string>(initialForm.pricingType);
   const [pricingValue, setPricingValue] = useState(initialForm.pricingValue);
+  const [widgetStyle, setWidgetStyle] = useState(initialForm.widgetStyle);
+  const [widgetHeading, setWidgetHeading] = useState(initialForm.widgetHeading);
+  const [accentColor, setAccentColor] = useState(initialForm.accentColor);
+  const [showPrices, setShowPrices] = useState(initialForm.showPrices);
   const [items, setItems] = useState<ItemState[]>(initialForm.items);
   const [collections, setCollections] = useState<CollectionState[]>(
     initialForm.collections,
@@ -467,11 +682,13 @@ export default function BundleBuilder() {
   const isDirty = useMemo(
     () =>
       JSON.stringify({
-        title, type, status, pricingType, pricingValue, items, collections,
+        title, type, status, pricingType, pricingValue, widgetStyle,
+        widgetHeading, accentColor, showPrices, items, collections,
         poolSource, slotCount, minItems, maxItems, tiers,
       }) !== JSON.stringify(initialForm),
     [
-      initialForm, title, type, status, pricingType, pricingValue, items,
+      initialForm, title, type, status, pricingType, pricingValue,
+      widgetStyle, widgetHeading, accentColor, showPrices, items,
       collections, poolSource, slotCount, minItems, maxItems, tiers,
     ],
   );
@@ -482,6 +699,10 @@ export default function BundleBuilder() {
     setStatus(initialForm.status);
     setPricingType(initialForm.pricingType);
     setPricingValue(initialForm.pricingValue);
+    setWidgetStyle(initialForm.widgetStyle);
+    setWidgetHeading(initialForm.widgetHeading);
+    setAccentColor(initialForm.accentColor);
+    setShowPrices(initialForm.showPrices);
     setItems(initialForm.items);
     setCollections(initialForm.collections);
     setPoolSource(initialForm.poolSource);
@@ -650,6 +871,10 @@ export default function BundleBuilder() {
       status,
       pricingType,
       pricingValue: parseFloat(pricingValue) || 0,
+      widgetStyle,
+      widgetHeading,
+      accentColor,
+      showPrices,
       // price/missing are editor-only display state — the DB schema doesn't store them
       items: usesCollections
         ? []
@@ -683,6 +908,7 @@ export default function BundleBuilder() {
     );
   }, [
     fetcher, title, description, type, status, pricingType, pricingValue,
+    widgetStyle, widgetHeading, accentColor, showPrices,
     items, minItems, maxItems, tiers, poolSource, collections, slotCount,
   ]);
 
@@ -1337,6 +1563,91 @@ export default function BundleBuilder() {
                         </Button>
                       </div>
                     </BlockStack>
+                  </BlockStack>
+                </Card>
+              )}
+
+              {type === "FIXED" && (
+                <Card>
+                  <BlockStack gap="400">
+                    <Text as="h2" variant="headingMd">
+                      Appearance
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Controls the &quot;what&apos;s inside&quot; widget shown on this
+                      bundle&apos;s product page. There&apos;s nothing to set up in the
+                      theme editor — everything lives here.
+                    </Text>
+                    <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
+                      {WIDGET_STYLE_OPTIONS.map((option) => (
+                        <WidgetStyleCard
+                          key={option.value}
+                          label={option.label}
+                          description={option.description}
+                          style={option.value}
+                          accent={accentColor}
+                          selected={widgetStyle === option.value}
+                          onSelect={() => setWidgetStyle(option.value)}
+                        />
+                      ))}
+                    </InlineGrid>
+                    <InlineStack gap="400" wrap>
+                      <div style={{ minWidth: 220, flex: 1 }}>
+                        <TextField
+                          label="Heading"
+                          value={widgetHeading}
+                          onChange={setWidgetHeading}
+                          autoComplete="off"
+                        />
+                      </div>
+                      <BlockStack gap="100">
+                        <Text as="span" variant="bodyMd">
+                          Accent color
+                        </Text>
+                        <InlineStack gap="200" blockAlign="center" wrap={false}>
+                          <div
+                            style={{
+                              width: 36,
+                              height: 36,
+                              flexShrink: 0,
+                              borderRadius: 8,
+                              overflow: "hidden",
+                              border: "1px solid var(--p-color-border)",
+                            }}
+                          >
+                            <input
+                              type="color"
+                              value={/^#[0-9a-fA-F]{6}$/.test(accentColor) ? accentColor : "#1a1a1a"}
+                              onChange={(event) => setAccentColor(event.target.value)}
+                              aria-label="Accent color"
+                              style={{
+                                width: "calc(100% + 16px)",
+                                height: "calc(100% + 16px)",
+                                margin: -8,
+                                padding: 0,
+                                border: "none",
+                                cursor: "pointer",
+                              }}
+                            />
+                          </div>
+                          <div style={{ width: 110 }}>
+                            <TextField
+                              label="Accent color"
+                              labelHidden
+                              value={accentColor}
+                              onChange={setAccentColor}
+                              autoComplete="off"
+                            />
+                          </div>
+                        </InlineStack>
+                      </BlockStack>
+                    </InlineStack>
+                    <Checkbox
+                      label="Show item prices"
+                      checked={showPrices}
+                      onChange={setShowPrices}
+                      helpText="Free gifts always show a “Free gift” badge instead of a price."
+                    />
                   </BlockStack>
                 </Card>
               )}

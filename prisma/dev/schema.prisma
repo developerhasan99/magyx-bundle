@@ -22,6 +22,11 @@ model Bundle {
   pricingValue    Float        @default(0)
   // FIXED bundles: the Shopify parent product we create for the bundle
   shopifyProductId String?
+  // Storefront "what's inside" widget appearance (FIXED bundles only)
+  widgetStyle     String       @default("numbered") // numbered | grid | minimal
+  widgetHeading   String       @default("What's inside")
+  accentColor     String       @default("#1a1a1a")
+  showPrices      Boolean      @default(false)
   items           BundleItem[]
   rule            BundleRule?
   createdAt       DateTime     @default(now())
