@@ -1663,7 +1663,7 @@ export default function BundleBuilder() {
                       onChange={setItemSubtextTemplate}
                       autoComplete="off"
                       placeholder="e.g. SKU: {{sku}} · {{metafield:custom.material}}"
-                      helpText="Optional line shown under each product's title. Insert {{sku}}, {{vendor}}, {{type}}, {{barcode}}, {{weight}}, or {{metafield:namespace.key}} — resolved per product when you save."
+                      helpText="Optional line shown under each product's title. Insert {{sku}}, {{vendor}}, {{type}}, {{barcode}}, {{weight}}, {{metafield:namespace.key}}, or — for a metaobject reference — {{metafield:namespace.key.value.field}}. Resolved per product when you save."
                     />
                   </BlockStack>
                 </Card>

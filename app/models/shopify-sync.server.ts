@@ -190,16 +190,37 @@ interface FixedBundlePublishInput {
   };
 }
 
+// {{metafield:ns.key}} reads a plain metafield's value. {{metafield:ns.key.value.field}}
+// mirrors Liquid's own `metafield.value.field` convention for a metaobject
+// reference: ns.key is the reference metafield, `field` is the metaobject's
+// field key.
 const SUBTEXT_PLACEHOLDER_RE =
-  /\{\{\s*(sku|vendor|type|barcode|weight)\s*\}\}|\{\{\s*metafield:([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\s*\}\}/g;
+  /\{\{\s*(?<basic>sku|vendor|type|barcode|weight)\s*\}\}|\{\{\s*metafield:(?<moNamespace>[a-zA-Z0-9_]+)\.(?<moKey>[a-zA-Z0-9_]+)\.value\.(?<moField>[a-zA-Z0-9_]+)\s*\}\}|\{\{\s*metafield:(?<namespace>[a-zA-Z0-9_]+)\.(?<key>[a-zA-Z0-9_]+)\s*\}\}/g;
 
-function extractMetafieldRefs(template: string): { namespace: string; key: string }[] {
-  const refs = new Map<string, { namespace: string; key: string }>();
+interface MetafieldRef {
+  namespace: string;
+  key: string;
+  // Set when the placeholder digs into a metaobject reference's field
+  field?: string;
+}
+
+function metafieldRefMapKey(ref: MetafieldRef): string {
+  return ref.field ? `${ref.namespace}.${ref.key}.value.${ref.field}` : `${ref.namespace}.${ref.key}`;
+}
+
+function extractMetafieldRefs(template: string): MetafieldRef[] {
+  const refs = new Map<string, MetafieldRef>();
   const re = new RegExp(SUBTEXT_PLACEHOLDER_RE.source, "g");
   let match: RegExpExecArray | null;
   while ((match = re.exec(template))) {
-    const [, , namespace, key] = match;
-    if (namespace && key) refs.set(`${namespace}.${key}`, { namespace, key });
+    const groups = match.groups ?? {};
+    const ref: MetafieldRef | null =
+      groups.moNamespace && groups.moKey && groups.moField
+        ? { namespace: groups.moNamespace, key: groups.moKey, field: groups.moField }
+        : groups.namespace && groups.key
+          ? { namespace: groups.namespace, key: groups.key }
+          : null;
+    if (ref) refs.set(metafieldRefMapKey(ref), ref);
   }
   return Array.from(refs.values());
 }
@@ -215,9 +236,21 @@ interface ItemDetails {
 
 function resolveItemSubtext(template: string, details: ItemDetails): string {
   return template
-    .replace(SUBTEXT_PLACEHOLDER_RE, (_match, basicField, namespace, key) => {
-      if (basicField) return details[basicField as keyof Omit<ItemDetails, "metafields">] ?? "";
-      if (namespace && key) return details.metafields[`${namespace}.${key}`] ?? "";
+    .replace(SUBTEXT_PLACEHOLDER_RE, (...args) => {
+      const groups = args[args.length - 1] as Record<string, string | undefined>;
+      if (groups.basic) {
+        return details[groups.basic as keyof Omit<ItemDetails, "metafields">] ?? "";
+      }
+      if (groups.moNamespace && groups.moKey && groups.moField) {
+        return (
+          details.metafields[
+            metafieldRefMapKey({ namespace: groups.moNamespace, key: groups.moKey, field: groups.moField })
+          ] ?? ""
+        );
+      }
+      if (groups.namespace && groups.key) {
+        return details.metafields[metafieldRefMapKey({ namespace: groups.namespace, key: groups.key })] ?? "";
+      }
       return "";
     })
     .trim();
@@ -225,8 +258,9 @@ function resolveItemSubtext(template: string, details: ItemDetails): string {
 
 /**
  * Resolves {{sku}}/{{vendor}}/{{type}}/{{barcode}}/{{weight}}/{{metafield:ns.key}}
- * placeholders in the merchant's item subtext template against live product
- * data — one extra query, only made when a template is actually set.
+ * /{{metafield:ns.key.value.field}} placeholders in the merchant's item
+ * subtext template against live product data — one extra query, only made
+ * when a template is actually set.
  */
 async function fetchItemSubtexts(
   admin: AdminApiContext,
@@ -239,8 +273,20 @@ async function fetchItemSubtexts(
     .map((i) => i.variantId)
     .filter((id): id is string => Boolean(id));
 
+  // Metaobject references can be single (`reference`) or list-typed
+  // (`references`) — query both and prefer whichever comes back, so the same
+  // {{metafield:ns.key.value.field}} syntax works for either field type.
   const metafieldFragment = metafieldRefs
-    .map((ref, i) => `mf${i}: metafield(namespace: "${ref.namespace}", key: "${ref.key}") { value }`)
+    .map((ref, i) =>
+      ref.field
+        ? `mf${i}: metafield(namespace: "${ref.namespace}", key: "${ref.key}") {
+             reference { ... on Metaobject { field(key: "${ref.field}") { value } } }
+             references(first: 1) {
+               nodes { ... on Metaobject { field(key: "${ref.field}") { value } } }
+             }
+           }`
+        : `mf${i}: metafield(namespace: "${ref.namespace}", key: "${ref.key}") { value }`,
+    )
     .join("\n");
 
   const response = await admin.graphql(
@@ -287,8 +333,20 @@ async function fetchItemSubtexts(
     const variant = item.variantId ? variantById.get(item.variantId) : undefined;
     const metafields: Record<string, string | null> = {};
     metafieldRefs.forEach((ref, i) => {
-      const mf = product?.[`mf${i}`] as { value?: string } | null | undefined;
-      metafields[`${ref.namespace}.${ref.key}`] = mf?.value ?? null;
+      if (ref.field) {
+        const mf = product?.[`mf${i}`] as
+          | {
+              reference?: { field?: { value?: string } | null } | null;
+              references?: { nodes?: { field?: { value?: string } | null }[] } | null;
+            }
+          | null
+          | undefined;
+        metafields[metafieldRefMapKey(ref)] =
+          mf?.reference?.field?.value ?? mf?.references?.nodes?.[0]?.field?.value ?? null;
+      } else {
+        const mf = product?.[`mf${i}`] as { value?: string } | null | undefined;
+        metafields[metafieldRefMapKey(ref)] = mf?.value ?? null;
+      }
     });
     const weight = (
       variant?.inventoryItem as
