@@ -1,0 +1,134 @@
+import { BlockStack, Text, ChoiceList, TextField, Box, InlineStack, Divider } from "@shopify/polaris";
+import type { ItemState } from "./types";
+
+// Shared pricing controls (fixed price / percent off / amount off) plus the
+// FIXED-only compare-at math box.
+export function PricingSection({
+  type,
+  activePricingType,
+  activePricingValue,
+  onPricingTypeChange,
+  onPricingValueChange,
+  pricingValueError,
+  paidItems,
+  combinedPrice,
+  computedBundlePrice,
+  savings,
+  hasMissingPrices,
+}: {
+  type: string;
+  activePricingType: string;
+  activePricingValue: string;
+  onPricingTypeChange: (value: string) => void;
+  onPricingValueChange: (value: string) => void;
+  pricingValueError: string | undefined;
+  paidItems: ItemState[];
+  combinedPrice: number;
+  computedBundlePrice: number;
+  savings: number;
+  hasMissingPrices: boolean;
+}) {
+  return (
+    <BlockStack gap="400">
+      <Text as="h2" variant="headingMd">
+        Pricing
+      </Text>
+      <ChoiceList
+        title="Pricing"
+        titleHidden
+        choices={[
+          { label: "Fixed bundle price", value: "FIXED_PRICE" },
+          { label: "Percentage off combined price", value: "PERCENT_OFF" },
+          { label: "Amount off combined price", value: "AMOUNT_OFF" },
+        ]}
+        selected={[activePricingType]}
+        onChange={(value) => onPricingTypeChange(value[0])}
+      />
+      <div style={{ maxWidth: 200 }}>
+        <TextField
+          label={
+            activePricingType === "FIXED_PRICE"
+              ? "Bundle price"
+              : activePricingType === "PERCENT_OFF"
+                ? "Discount"
+                : "Amount off"
+          }
+          type="number"
+          min={0}
+          max={activePricingType === "PERCENT_OFF" ? 100 : undefined}
+          value={activePricingValue}
+          onChange={onPricingValueChange}
+          autoComplete="off"
+          prefix={activePricingType === "PERCENT_OFF" ? undefined : "$"}
+          suffix={activePricingType === "PERCENT_OFF" ? "%" : undefined}
+          error={pricingValueError}
+        />
+      </div>
+      {type === "FIXED" && paidItems.length > 0 && (
+        <Box background="bg-surface-secondary" borderRadius="200" padding="300">
+          <BlockStack gap="200">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="span" variant="bodyMd" tone="subdued">
+                Original price (compare-at)
+              </Text>
+              <Text
+                as="span"
+                variant="bodyMd"
+                tone="subdued"
+                textDecorationLine={
+                  savings > 0 ? "line-through" : undefined
+                }
+              >
+                ${combinedPrice.toFixed(2)}
+              </Text>
+            </InlineStack>
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="span" variant="bodyMd">
+                Bundle price
+              </Text>
+              <Text as="span" variant="bodyMd" fontWeight="semibold">
+                ${computedBundlePrice.toFixed(2)}
+              </Text>
+            </InlineStack>
+            <Divider />
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="span" variant="bodyMd" fontWeight="semibold">
+                Customer saves
+              </Text>
+              <Text
+                as="span"
+                variant="bodyMd"
+                fontWeight="semibold"
+                tone={savings > 0 ? "success" : "subdued"}
+              >
+                ${Math.max(0, savings).toFixed(2)}
+                {savings > 0 && combinedPrice > 0
+                  ? ` (${Math.round((savings / combinedPrice) * 100)}%)`
+                  : ""}
+              </Text>
+            </InlineStack>
+            {savings > 0 ? (
+              <Text as="p" variant="bodySm" tone="subdued">
+                The original ${combinedPrice.toFixed(2)} combined
+                price is set as the compare-at (strikethrough)
+                price on the bundle product.
+              </Text>
+            ) : (
+              <Text as="p" variant="bodySm" tone="caution">
+                The bundle price isn&apos;t below the combined
+                price of its products, so no compare-at price
+                will be shown to customers.
+              </Text>
+            )}
+            {hasMissingPrices && (
+              <Text as="p" variant="bodySm" tone="caution">
+                Some product prices couldn&apos;t be loaded, so
+                these totals may be incomplete.
+              </Text>
+            )}
+          </BlockStack>
+        </Box>
+      )}
+    </BlockStack>
+  );
+}

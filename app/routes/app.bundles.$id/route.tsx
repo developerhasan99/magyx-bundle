@@ -1,0 +1,1431 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ActionFunctionArgs, LoaderFunctionArgs, SerializeFrom } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
+import { useFetcher, useLoaderData, useRevalidator } from "@remix-run/react";
+import {
+  Page,
+  Layout,
+  Card,
+  BlockStack,
+  InlineStack,
+  Text,
+  TextField,
+  Button,
+  Banner,
+  Badge,
+  Divider,
+  Box,
+} from "@shopify/polaris";
+import { PlusIcon } from "@shopify/polaris-icons";
+import { SaveBar, TitleBar, useAppBridge } from "@shopify/app-bridge-react";
+import { authenticate } from "../../shopify.server";
+import {
+  createBundle,
+  deleteBundle,
+  getBundle,
+  updateBundle,
+  type BundleInput,
+} from "../../models/bundle.server";
+import {
+  publishFixedBundleProduct,
+  syncBundleConfigMetafield,
+} from "../../models/shopify-sync.server";
+import {
+  defaultPackageState,
+  defaultQbTiers,
+  type CollectionState,
+  type ItemState,
+  type PackageState,
+  type QbTierState,
+  type TierState,
+} from "./types";
+import { ProductsSection } from "./ProductsSection";
+import { GiftsSection } from "./GiftsSection";
+import { PricingSection } from "./PricingSection";
+import { PackagesTabsSection } from "./PackagesTabsSection";
+import { QuantityBreaksTiersSection } from "./QuantityBreaksTiersSection";
+import { QuantityBreaksWidgetSection } from "./QuantityBreaksWidgetSection";
+import { MixMatchRulesSection } from "./MixMatchRulesSection";
+import { FixedAppearanceSection } from "./FixedAppearanceSection";
+import { PreviewSidebar } from "./PreviewSidebar";
+
+const CREATABLE_BUNDLE_TYPES = ["FIXED", "SLOT_BUILDER", "MIX_MATCH", "QUANTITY_BREAKS"];
+
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+  const { admin, session } = await authenticate.admin(request);
+  if (params.id === "new") {
+    // Set by the /app/bundles/create type picker so this editor opens with
+    // the chosen type pre-selected instead of always defaulting to FIXED.
+    const requestedType = new URL(request.url).searchParams.get("type");
+    return {
+      bundle: null,
+      shopifyProduct: null,
+      requestedType: CREATABLE_BUNDLE_TYPES.includes(requestedType ?? "")
+        ? (requestedType as "FIXED" | "SLOT_BUILDER" | "MIX_MATCH" | "QUANTITY_BREAKS")
+        : null,
+    };
+  }
+
+  const bundle = await getBundle(session.shop, params.id!);
+  if (!bundle) throw new Response("Not found", { status: 404 });
+
+  let shopifyProduct: {
+    title: string;
+    status: string;
+    imageUrl: string | null;
+    price: string | null;
+    previewUrl: string | null;
+  } | null = null;
+  if (bundle.shopifyProductId) {
+    try {
+      const response = await admin.graphql(
+        `#graphql
+        query bundleParentProduct($id: ID!) {
+          product(id: $id) {
+            title
+            status
+            onlineStorePreviewUrl
+            featuredMedia { preview { image { url } } }
+            variants(first: 1) { edges { node { price } } }
+          }
+        }`,
+        { variables: { id: bundle.shopifyProductId } },
+      );
+      const product = (await response.json()).data?.product;
+      if (product) {
+        shopifyProduct = {
+          title: product.title,
+          status: product.status,
+          imageUrl: product.featuredMedia?.preview?.image?.url ?? null,
+          price: product.variants?.edges?.[0]?.node?.price ?? null,
+          previewUrl: product.onlineStorePreviewUrl ?? null,
+        };
+      }
+    } catch (error) {
+      console.warn("Magyx Bundle: could not load bundle parent product", error);
+    }
+  }
+
+  // Live component prices so the editor can show the combined (compare-at)
+  // price; fetched fresh rather than stored, so price changes are reflected
+  const priceByVariant = new Map<string, number>();
+  // Distinguishes "lookup failed" from "variant deleted": only flag items as
+  // missing when the query itself succeeded
+  let pricesLoaded = false;
+  const itemVariantIds = Array.from(
+    new Set([
+      ...bundle.items.map((i) => i.variantId).filter((id): id is string => Boolean(id)),
+      ...bundle.packages.flatMap((p) =>
+        p.items.map((i) => i.variantId).filter((id): id is string => Boolean(id)),
+      ),
+      ...bundle.tiers.flatMap((t) =>
+        t.items.map((i) => i.variantId).filter((id): id is string => Boolean(id)),
+      ),
+    ]),
+  );
+  if (itemVariantIds.length > 0) {
+    try {
+      const response = await admin.graphql(
+        `#graphql
+        query bundleItemPrices($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on ProductVariant { id price }
+          }
+        }`,
+        { variables: { ids: itemVariantIds } },
+      );
+      for (const node of (await response.json()).data?.nodes ?? []) {
+        if (node) priceByVariant.set(node.id, parseFloat(node.price));
+      }
+      pricesLoaded = true;
+    } catch (error) {
+      console.warn("Magyx Bundle: could not load component prices", error);
+    }
+  }
+
+  // Resolve collection GIDs from the rule into titles/images for the editor UI
+  let collections: { id: string; title: string; imageUrl: string | null }[] = [];
+  const collectionIds: string[] = bundle.rule
+    ? (JSON.parse(bundle.rule.collectionIds) as string[])
+    : [];
+  if (collectionIds.length > 0) {
+    try {
+      const response = await admin.graphql(
+        `#graphql
+        query bundleCollections($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Collection {
+              id
+              title
+              image { url }
+            }
+          }
+        }`,
+        { variables: { ids: collectionIds } },
+      );
+      collections = ((await response.json()).data?.nodes ?? [])
+        .filter(Boolean)
+        .map((node: { id: string; title: string; image?: { url: string } | null }) => ({
+          id: node.id,
+          title: node.title,
+          imageUrl: node.image?.url ?? null,
+        }));
+    } catch (error) {
+      console.warn("Magyx Bundle: could not load bundle collections", error);
+      // Keep the IDs so a failed lookup doesn't wipe selections on next save
+      collections = collectionIds.map((id) => ({
+        id,
+        title: `Collection ${id.split("/").pop()}`,
+        imageUrl: null,
+      }));
+    }
+  }
+
+  return {
+    shopifyProduct,
+    requestedType: null,
+    bundle: {
+      id: bundle.id,
+      title: bundle.title,
+      description: bundle.description ?? "",
+      type: bundle.type,
+      status: bundle.status,
+      pricingType: bundle.pricingType,
+      pricingValue: bundle.pricingValue,
+      shopifyProductId: bundle.shopifyProductId,
+      widgetStyle: bundle.widgetStyle,
+      widgetHeading: bundle.widgetHeading,
+      accentColor: bundle.accentColor,
+      showPrices: bundle.showPrices,
+      itemSubtextTemplate: bundle.itemSubtextTemplate,
+      showSubtextOnGifts: bundle.showSubtextOnGifts,
+      freeShipping: bundle.freeShipping,
+      quantityBreakScope: bundle.quantityBreakScope,
+      items: bundle.items.map((i) => ({
+        productId: i.productId,
+        variantId: i.variantId,
+        productTitle: i.productTitle,
+        productImageUrl: i.productImageUrl,
+        quantity: i.quantity,
+        isGift: i.isGift,
+        price: i.variantId ? (priceByVariant.get(i.variantId) ?? null) : null,
+        missing:
+          pricesLoaded && Boolean(i.variantId) && !priceByVariant.has(i.variantId!),
+      })),
+      packages: bundle.packages.map((p) => ({
+        id: p.id,
+        label: p.label,
+        badgeText: p.badgeText,
+        badgeTone: p.badgeTone,
+        pricingType: p.pricingType,
+        pricingValue: p.pricingValue,
+        freeShipping: p.freeShipping,
+        shopifyVariantId: p.shopifyVariantId,
+        items: p.items.map((i) => ({
+          productId: i.productId,
+          variantId: i.variantId,
+          productTitle: i.productTitle,
+          productImageUrl: i.productImageUrl,
+          quantity: i.quantity,
+          isGift: i.isGift,
+          price: i.variantId ? (priceByVariant.get(i.variantId) ?? null) : null,
+          missing:
+            pricesLoaded && Boolean(i.variantId) && !priceByVariant.has(i.variantId!),
+        })),
+      })),
+      collections,
+      tiers: bundle.tiers.map((t) => ({
+        id: t.id,
+        quantity: t.quantity,
+        label: t.label,
+        badgeText: t.badgeText,
+        badgeTone: t.badgeTone,
+        pricingType: t.pricingType,
+        pricingValue: t.pricingValue,
+        isDefault: t.isDefault,
+        items: t.items.map((i) => ({
+          productId: i.productId,
+          variantId: i.variantId,
+          productTitle: i.productTitle,
+          productImageUrl: i.productImageUrl,
+          quantity: i.quantity,
+          price: i.variantId ? (priceByVariant.get(i.variantId) ?? null) : null,
+          missing:
+            pricesLoaded && Boolean(i.variantId) && !priceByVariant.has(i.variantId!),
+        })),
+      })),
+      rule: bundle.rule
+        ? {
+            minItems: bundle.rule.minItems,
+            maxItems: bundle.rule.maxItems,
+            discountTiers: JSON.parse(bundle.rule.discountTiers) as {
+              quantity: number;
+              discount: number;
+            }[],
+            collectionIds,
+          }
+        : null,
+    },
+  };
+};
+
+export const action = async ({ request, params }: ActionFunctionArgs) => {
+  const { admin, session } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  if (intent === "delete" && params.id !== "new") {
+    await deleteBundle(session.shop, params.id!);
+    await syncBundleConfigMetafield(admin, session.shop);
+    return redirect("/app");
+  }
+
+  const payload = JSON.parse(String(formData.get("payload"))) as BundleInput & {
+    rule?: { minItems: number; maxItems: number | null; discountTiers: { quantity: number; discount: number }[]; collectionIds: string[] } | null;
+  };
+
+  const errors: string[] = [];
+  const hasPool =
+    payload.items.length > 0 || (payload.rule?.collectionIds?.length ?? 0) > 0;
+  if (!payload.title?.trim()) errors.push("Title is required.");
+  if (payload.type === "FIXED") {
+    if (payload.packages.length === 0) errors.push("Add at least one package.");
+    payload.packages.forEach((pkg, i) => {
+      const label = pkg.label?.trim() || `Package ${i + 1}`;
+      if (!pkg.label?.trim()) errors.push(`Package ${i + 1} needs a title.`);
+      if (pkg.items.filter((item) => !item.isGift).length < 2)
+        errors.push(`"${label}" needs at least two products.`);
+      if (pkg.pricingValue < 0) errors.push(`"${label}" pricing value can't be negative.`);
+      if (pkg.pricingType === "PERCENT_OFF" && pkg.pricingValue > 100)
+        errors.push(`"${label}" discount can't be more than 100%.`);
+    });
+  } else if (payload.type === "QUANTITY_BREAKS") {
+    if (payload.quantityBreakScope === "PRODUCTS" && payload.items.length === 0)
+      errors.push("Select at least one product this applies to.");
+    if (
+      payload.quantityBreakScope === "COLLECTIONS" &&
+      (payload.rule?.collectionIds?.length ?? 0) === 0
+    )
+      errors.push("Select at least one collection this applies to.");
+    if ((payload.tiers?.length ?? 0) === 0) errors.push("Add at least one pack size.");
+    payload.tiers?.forEach((tier, i) => {
+      const label = tier.label?.trim() || `Tier ${i + 1}`;
+      if (!tier.quantity || tier.quantity < 1)
+        errors.push(`"${label}" needs a quantity of at least 1.`);
+      if (tier.pricingValue < 0) errors.push(`"${label}" pricing value can't be negative.`);
+      if (tier.pricingType === "PERCENT_OFF" && tier.pricingValue > 100)
+        errors.push(`"${label}" discount can't be more than 100%.`);
+    });
+  } else {
+    if (!hasPool)
+      errors.push("Add products or select at least one collection for customers to pick from.");
+    if (payload.pricingValue < 0) errors.push("Pricing value can't be negative.");
+    if (payload.pricingType === "PERCENT_OFF" && payload.pricingValue > 100)
+      errors.push("Discount can't be more than 100%.");
+  }
+  if (payload.type === "MIX_MATCH" && (payload.rule?.discountTiers?.length ?? 0) === 0)
+    errors.push("Add at least one discount tier.");
+  if (payload.rule?.discountTiers?.some((t) => t.discount > 100))
+    errors.push("Tier discounts can't be more than 100%.");
+  if (payload.type === "SLOT_BUILDER" && (payload.rule?.minItems ?? 0) < 2)
+    errors.push("Bundle builder needs at least two slots.");
+  if (errors.length) return { errors };
+
+  const input: BundleInput = {
+    ...payload,
+    items: payload.items.map((item, position) => ({ ...item, position })),
+    packages: payload.packages.map((pkg, position) => ({
+      ...pkg,
+      position,
+      items: pkg.items.map((item, itemPosition) => ({ ...item, position: itemPosition })),
+    })),
+    tiers: (payload.tiers ?? []).map((tier, position) => ({
+      ...tier,
+      position,
+      items: (tier.items ?? []).map((item, itemPosition) => ({ ...item, position: itemPosition })),
+    })),
+    // QUANTITY_BREAKS only sends a rule when scoped to collections (see
+    // save()'s payload construction) — falls through to payload.rule as-is.
+    rule: payload.type === "FIXED" ? null : payload.rule,
+  };
+
+  const bundle =
+    params.id === "new"
+      ? await createBundle(session.shop, input)
+      : await updateBundle(session.shop, params.id!, input);
+
+  // Publishing a fixed bundle creates/updates its parent product in Shopify
+  if (bundle.type === "FIXED" && bundle.status === "ACTIVE") {
+    try {
+      await publishFixedBundleProduct(
+        admin,
+        {
+          bundleId: bundle.id,
+          title: bundle.title,
+          description: bundle.description,
+          widgetSettings: {
+            style: bundle.widgetStyle,
+            heading: bundle.widgetHeading,
+            accentColor: bundle.accentColor,
+            showPrices: bundle.showPrices,
+            itemSubtextTemplate: bundle.itemSubtextTemplate,
+            showSubtextOnGifts: bundle.showSubtextOnGifts,
+          },
+          packages: bundle.packages.map((pkg) => ({
+            packageId: pkg.id,
+            existingVariantId: pkg.shopifyVariantId,
+            label: pkg.label,
+            badgeText: pkg.badgeText,
+            badgeTone: pkg.badgeTone,
+            pricingType: pkg.pricingType,
+            pricingValue: pkg.pricingValue,
+            freeShipping: pkg.freeShipping,
+            componentVariantIds: pkg.items
+              .filter((i) => i.variantId)
+              .map((i) => ({ variantId: i.variantId!, quantity: i.quantity, isGift: i.isGift })),
+            displayItems: pkg.items.map((i) => ({
+              title: i.productTitle,
+              imageUrl: i.productImageUrl,
+              quantity: i.quantity,
+              productId: i.productId,
+              variantId: i.variantId,
+              isGift: i.isGift,
+            })),
+          })),
+        },
+        bundle.shopifyProductId,
+      );
+    } catch (error) {
+      return {
+        errors: [
+          `Bundle saved, but publishing the product failed: ${
+            error instanceof Error ? error.message : "unknown error"
+          }`,
+        ],
+      };
+    }
+  }
+
+  await syncBundleConfigMetafield(admin, session.shop);
+
+  if (params.id === "new") return redirect(`/app/bundles/${bundle.id}`);
+  return { saved: true };
+};
+
+type LoaderBundle = SerializeFrom<typeof loader>["bundle"];
+
+// Derives editor form state from the loaded bundle. Used for initial values,
+// for resetting on discard, and as the baseline for dirty-state detection —
+// keep field order stable, the dirty check compares JSON serializations.
+function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
+  const type = bundle?.type ?? requestedType ?? "FIXED";
+  return {
+    title: bundle?.title ?? "",
+    type,
+    status: bundle?.status ?? "DRAFT",
+    pricingType:
+      bundle?.pricingType ?? (type === "MIX_MATCH" ? "PERCENT_OFF" : "FIXED_PRICE"),
+    pricingValue: String(bundle?.pricingValue ?? ""),
+    widgetStyle: bundle?.widgetStyle ?? "numbered",
+    widgetHeading: bundle?.widgetHeading ?? "What's inside",
+    accentColor: bundle?.accentColor ?? "#1a1a1a",
+    showPrices: bundle?.showPrices ?? false,
+    itemSubtextTemplate: bundle?.itemSubtextTemplate ?? "",
+    showSubtextOnGifts: bundle?.showSubtextOnGifts ?? true,
+    freeShipping: bundle?.freeShipping ?? false,
+    items:
+      bundle?.items.map((i): ItemState => ({
+        productId: i.productId,
+        variantId: i.variantId ?? null,
+        productTitle: i.productTitle,
+        productImageUrl: i.productImageUrl ?? null,
+        quantity: i.quantity,
+        isGift: i.isGift ?? false,
+        price: i.price ?? null,
+        missing: i.missing ?? false,
+      })) ?? [],
+    packages:
+      bundle?.packages && bundle.packages.length > 0
+        ? bundle.packages.map(
+            (p): PackageState => ({
+              id: p.id,
+              tempKey: p.id,
+              label: p.label,
+              badgeText: p.badgeText ?? "",
+              badgeTone: p.badgeTone ?? "",
+              pricingType: p.pricingType,
+              pricingValue: String(p.pricingValue),
+              freeShipping: p.freeShipping,
+              items: p.items.map(
+                (i): ItemState => ({
+                  productId: i.productId,
+                  variantId: i.variantId ?? null,
+                  productTitle: i.productTitle,
+                  productImageUrl: i.productImageUrl ?? null,
+                  quantity: i.quantity,
+                  isGift: i.isGift ?? false,
+                  price: i.price ?? null,
+                  missing: i.missing ?? false,
+                }),
+              ),
+            }),
+          )
+        : [defaultPackageState()],
+    collections: (bundle?.collections ?? []) as CollectionState[],
+    // QUANTITY_BREAKS persists its scope explicitly (it needs a distinct
+    // "ALL" value that can't be inferred from an empty items/collections
+    // list); every other type still infers it from whether collections exist.
+    poolSource:
+      bundle?.type === "QUANTITY_BREAKS"
+        ? (bundle.quantityBreakScope ?? "PRODUCTS")
+        : (bundle?.collections?.length ?? 0) > 0
+          ? "COLLECTIONS"
+          : "PRODUCTS",
+    slotCount: String((bundle?.type === "SLOT_BUILDER" && bundle?.rule?.minItems) || 3),
+    minItems: String((bundle?.type === "MIX_MATCH" && bundle?.rule?.minItems) || 2),
+    maxItems: bundle?.rule?.maxItems ? String(bundle.rule.maxItems) : "",
+    tiers:
+      bundle?.rule?.discountTiers.map(
+        (t): TierState => ({
+          quantity: String(t.quantity),
+          discount: String(t.discount),
+        }),
+      ) ?? [{ quantity: "2", discount: "10" }],
+    qbTiers:
+      bundle?.tiers && bundle.tiers.length > 0
+        ? bundle.tiers.map(
+            (t): QbTierState => ({
+              id: t.id,
+              tempKey: t.id,
+              quantity: String(t.quantity),
+              label: t.label,
+              badgeText: t.badgeText ?? "",
+              badgeTone: t.badgeTone ?? "",
+              pricingType: t.pricingType,
+              pricingValue: String(t.pricingValue),
+              isDefault: t.isDefault,
+              items: t.items.map(
+                (i): ItemState => ({
+                  productId: i.productId,
+                  variantId: i.variantId ?? null,
+                  productTitle: i.productTitle,
+                  productImageUrl: i.productImageUrl ?? null,
+                  quantity: i.quantity,
+                  isGift: true,
+                  price: i.price ?? null,
+                  missing: i.missing ?? false,
+                }),
+              ),
+            }),
+          )
+        : defaultQbTiers(),
+  };
+}
+
+export default function BundleBuilder() {
+  const { bundle, shopifyProduct, requestedType } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<typeof action>();
+  const deleteFetcher = useFetcher<typeof action>();
+  const revalidator = useRevalidator();
+  const shopify = useAppBridge();
+  const isNew = !bundle;
+
+  const initialForm = useMemo(
+    () => formStateOf(bundle, requestedType),
+    [bundle, requestedType],
+  );
+
+  const [title, setTitle] = useState(initialForm.title);
+  // No longer editable in the UI, but sent on save so existing values persist
+  const description = bundle?.description ?? "";
+  const [type, setType] = useState<string>(initialForm.type);
+  const [status, setStatus] = useState<string>(initialForm.status);
+  const [pricingType, setPricingType] = useState<string>(initialForm.pricingType);
+  const [pricingValue, setPricingValue] = useState(initialForm.pricingValue);
+  const [widgetStyle, setWidgetStyle] = useState(initialForm.widgetStyle);
+  const [widgetHeading, setWidgetHeading] = useState(initialForm.widgetHeading);
+  const [accentColor, setAccentColor] = useState(initialForm.accentColor);
+  const [showPrices, setShowPrices] = useState(initialForm.showPrices);
+  const [itemSubtextTemplate, setItemSubtextTemplate] = useState(
+    initialForm.itemSubtextTemplate,
+  );
+  const [showSubtextOnGifts, setShowSubtextOnGifts] = useState(
+    initialForm.showSubtextOnGifts,
+  );
+  const [freeShipping, setFreeShipping] = useState(initialForm.freeShipping);
+  const [items, setItems] = useState<ItemState[]>(initialForm.items);
+  const [packages, setPackages] = useState<PackageState[]>(initialForm.packages);
+  const [activePackageIndex, setActivePackageIndex] = useState(0);
+  const [collections, setCollections] = useState<CollectionState[]>(
+    initialForm.collections,
+  );
+  const [poolSource, setPoolSource] = useState<string>(initialForm.poolSource);
+  const [slotCount, setSlotCount] = useState(initialForm.slotCount);
+  const [minItems, setMinItems] = useState(initialForm.minItems);
+  const [maxItems, setMaxItems] = useState(initialForm.maxItems);
+  const [tiers, setTiers] = useState<TierState[]>(initialForm.tiers);
+  const [qbTiers, setQbTiers] = useState<QbTierState[]>(initialForm.qbTiers);
+  const [activeQbTierIndex, setActiveQbTierIndex] = useState(0);
+
+  // Keep the active tab in range when a package is added (select it) or
+  // removed (fall back to the last remaining one)
+  const prevPackagesLengthRef = useRef(packages.length);
+  useEffect(() => {
+    if (packages.length > prevPackagesLengthRef.current) {
+      setActivePackageIndex(packages.length - 1);
+    } else if (activePackageIndex >= packages.length) {
+      setActivePackageIndex(Math.max(0, packages.length - 1));
+    }
+    prevPackagesLengthRef.current = packages.length;
+  }, [packages.length, activePackageIndex]);
+
+  // Same in-range/auto-select behavior as packages above, for pack-size tabs
+  const prevQbTiersLengthRef = useRef(qbTiers.length);
+  useEffect(() => {
+    if (qbTiers.length > prevQbTiersLengthRef.current) {
+      setActiveQbTierIndex(qbTiers.length - 1);
+    } else if (activeQbTierIndex >= qbTiers.length) {
+      setActiveQbTierIndex(Math.max(0, qbTiers.length - 1));
+    }
+    prevQbTiersLengthRef.current = qbTiers.length;
+  }, [qbTiers.length, activeQbTierIndex]);
+
+  // FIXED bundles source their item list/pricing from the active package;
+  // every other type keeps using the flat top-level state exactly as before
+  const activeItems = useMemo(
+    () => (type === "FIXED" ? (packages[activePackageIndex]?.items ?? []) : items),
+    [type, packages, activePackageIndex, items],
+  );
+  const activePricingType =
+    type === "FIXED" ? (packages[activePackageIndex]?.pricingType ?? "FIXED_PRICE") : pricingType;
+  const activePricingValue =
+    type === "FIXED" ? (packages[activePackageIndex]?.pricingValue ?? "") : pricingValue;
+
+  const setActiveItems = useCallback(
+    (updater: (current: ItemState[]) => ItemState[]) => {
+      if (type === "FIXED") {
+        setPackages((current) =>
+          current.map((pkg, i) =>
+            i === activePackageIndex ? { ...pkg, items: updater(pkg.items) } : pkg,
+          ),
+        );
+      } else {
+        setItems(updater);
+      }
+    },
+    [type, activePackageIndex],
+  );
+
+  const updateActivePackage = useCallback(
+    (patch: Partial<PackageState>) => {
+      setPackages((current) =>
+        current.map((pkg, i) => (i === activePackageIndex ? { ...pkg, ...patch } : pkg)),
+      );
+    },
+    [activePackageIndex],
+  );
+
+  const addPackage = useCallback(() => {
+    setPackages((current) => [
+      ...current,
+      { ...defaultPackageState(), tempKey: `new-${Date.now()}`, label: `Pack ${current.length + 1}` },
+    ]);
+  }, []);
+
+  const removeActivePackage = useCallback(() => {
+    setPackages((current) => current.filter((_, i) => i !== activePackageIndex));
+  }, [activePackageIndex]);
+
+  // Gifts only apply to FIXED bundles; paidItems/giftItems split the active
+  // items list for rendering and price math without mutating storage shape
+  const paidItems = useMemo(() => activeItems.filter((i) => !i.isGift), [activeItems]);
+  const giftItems = useMemo(() => activeItems.filter((i) => i.isGift), [activeItems]);
+
+  const isSaving = fetcher.state !== "idle";
+
+  const isDirty = useMemo(
+    () =>
+      JSON.stringify({
+        title, type, status, pricingType, pricingValue, widgetStyle,
+        widgetHeading, accentColor, showPrices, itemSubtextTemplate,
+        showSubtextOnGifts, freeShipping, items, packages, collections, poolSource, slotCount,
+        minItems, maxItems, tiers, qbTiers,
+      }) !== JSON.stringify(initialForm),
+    [
+      initialForm, title, type, status, pricingType, pricingValue,
+      widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
+      showSubtextOnGifts, freeShipping, items, packages, collections, poolSource, slotCount,
+      minItems, maxItems, tiers, qbTiers,
+    ],
+  );
+
+  // Shared by discard() (reset to the last-loaded state) and the post-save
+  // resync below (adopt the freshly-saved state, e.g. server-assigned ids for
+  // pack sizes/packages created in this session) — both are "make local
+  // editor state match a `formStateOf(...)` snapshot exactly."
+  // resetActiveTabs is false for the post-save resync so the user isn't
+  // knocked back to the first package/pack-size tab right after saving.
+  const applyFormState = useCallback(
+    (form: ReturnType<typeof formStateOf>, resetActiveTabs: boolean) => {
+      setTitle(form.title);
+      setType(form.type);
+      setStatus(form.status);
+      setPricingType(form.pricingType);
+      setPricingValue(form.pricingValue);
+      setWidgetStyle(form.widgetStyle);
+      setWidgetHeading(form.widgetHeading);
+      setAccentColor(form.accentColor);
+      setShowPrices(form.showPrices);
+      setItemSubtextTemplate(form.itemSubtextTemplate);
+      setShowSubtextOnGifts(form.showSubtextOnGifts);
+      setFreeShipping(form.freeShipping);
+      setItems(form.items);
+      setPackages(form.packages);
+      if (resetActiveTabs) setActivePackageIndex(0);
+      setCollections(form.collections);
+      setPoolSource(form.poolSource);
+      setSlotCount(form.slotCount);
+      setMinItems(form.minItems);
+      setMaxItems(form.maxItems);
+      setTiers(form.tiers);
+      setQbTiers(form.qbTiers);
+      if (resetActiveTabs) setActiveQbTierIndex(0);
+    },
+    [],
+  );
+
+  const discard = useCallback(() => {
+    applyFormState(initialForm, true);
+  }, [initialForm, applyFormState]);
+  const errors = fetcher.data && "errors" in fetcher.data ? fetcher.data.errors : null;
+
+  const lastHandledSaveRef = useRef<typeof fetcher.data | null>(null);
+  const justSavedRef = useRef(false);
+  useEffect(() => {
+    if (
+      fetcher.state === "idle" &&
+      fetcher.data &&
+      "saved" in fetcher.data &&
+      fetcher.data !== lastHandledSaveRef.current
+    ) {
+      lastHandledSaveRef.current = fetcher.data;
+      shopify.toast.show("Bundle saved");
+      justSavedRef.current = true;
+      revalidator.revalidate();
+    }
+  }, [fetcher.state, fetcher.data, shopify, revalidator]);
+
+  // Revalidating after a save re-fetches the bundle with server-assigned ids
+  // for anything created in this session (new packages, new pack-size
+  // tiers) — without this, local state keeps its id-less/temp-keyed copies,
+  // which never matches the freshly-loaded `initialForm` and leaves the
+  // save bar stuck open right after a successful save. Also covers the
+  // create flow, where the redirect to the new bundle's URL swaps `bundle`
+  // from null to the created record without remounting this component.
+  const prevBundleRef = useRef(bundle);
+  useEffect(() => {
+    const justCreated = prevBundleRef.current === null && bundle !== null;
+    if ((justSavedRef.current || justCreated) && bundle !== prevBundleRef.current) {
+      justSavedRef.current = false;
+      applyFormState(formStateOf(bundle, requestedType), false);
+    }
+    prevBundleRef.current = bundle;
+  }, [bundle, requestedType, applyFormState]);
+
+  const openResourcePicker = useCallback(async (isGiftFlag: boolean) => {
+    // Fixed bundles are variant-level: preselect the exact variants so the
+    // picker shows them checked, and each selected variant becomes its own
+    // line item. Pool types stay product-level. Scoped to the matching
+    // group (paid vs. gift) so picking gifts doesn't preselect/overwrite
+    // the paid component list, and vice versa.
+    const groupItems = activeItems.filter((i) => i.isGift === isGiftFlag);
+    const selectionIds =
+      type === "FIXED"
+        ? Array.from(
+            groupItems.reduce((byProduct, item) => {
+              if (item.variantId) {
+                const entry = byProduct.get(item.productId) ?? {
+                  id: item.productId,
+                  variants: [] as { id: string }[],
+                };
+                entry.variants.push({ id: item.variantId });
+                byProduct.set(item.productId, entry);
+              } else {
+                byProduct.set(item.productId, { id: item.productId, variants: [] });
+              }
+              return byProduct;
+            }, new Map<string, { id: string; variants: { id: string }[] }>()),
+            ([, entry]) =>
+              entry.variants.length > 0 ? entry : { id: entry.id },
+          )
+        : groupItems.map((i) => ({ id: i.productId }));
+
+    const selection = await shopify.resourcePicker({
+      type: "product",
+      multiple: true,
+      action: "add",
+      selectionIds,
+      // QUANTITY_BREAKS applies across every variant of a product — there's
+      // nothing to pick at the variant level, so hide that UI entirely.
+      ...(type === "QUANTITY_BREAKS" ? { filter: { variants: false } } : {}),
+    });
+    if (!selection) return;
+
+    const toPrice = (raw: unknown) => {
+      const price = parseFloat(String(raw));
+      return Number.isNaN(price) ? null : price;
+    };
+
+    if (type === "FIXED") {
+      setActiveItems((current) => {
+        // Scoped to the same group so an existing paid item isn't reused
+        // (with the wrong isGift flag) when adding to the gift group, or
+        // vice versa.
+        const byVariant = new Map(
+          current
+            .filter((i) => i.isGift === isGiftFlag)
+            .map((i) => [i.variantId ?? i.productId, i]),
+        );
+        const newGroupItems = selection.flatMap((product: any) => {
+          const variants: any[] = product.variants?.length
+            ? product.variants
+            : [null];
+          return variants.map((variant) => {
+            const existing = byVariant.get(variant?.id ?? product.id);
+            if (existing) return existing;
+            const hasRealTitle =
+              variant?.title && variant.title !== "Default Title";
+            return {
+              productId: product.id,
+              variantId: variant?.id ?? null,
+              productTitle: hasRealTitle
+                ? `${product.title} — ${variant.title}`
+                : product.title,
+              productImageUrl:
+                variant?.image?.originalSrc ??
+                product.images?.[0]?.originalSrc ??
+                null,
+              quantity: 1,
+              isGift: isGiftFlag,
+              price: toPrice(variant?.price),
+              missing: false,
+            };
+          });
+        });
+        return [...current.filter((i) => i.isGift !== isGiftFlag), ...newGroupItems];
+      });
+      return;
+    }
+
+    setItems((current) => {
+      const byProduct = new Map(current.map((i) => [i.productId, i]));
+      return selection.map(
+        (product: any) =>
+          byProduct.get(product.id) ?? {
+            productId: product.id,
+            // QUANTITY_BREAKS applies across every variant of the product —
+            // never pin to one, unlike MIX_MATCH which adds this specific
+            // variant to the cart when a shopper picks it.
+            variantId: type === "QUANTITY_BREAKS" ? null : (product.variants?.[0]?.id ?? null),
+            productTitle: product.title,
+            productImageUrl: product.images?.[0]?.originalSrc ?? null,
+            quantity: 1,
+            isGift: false,
+            price: toPrice(product.variants?.[0]?.price),
+            missing: false,
+          },
+      );
+    });
+  }, [shopify, activeItems, type, setActiveItems]);
+
+  const openCollectionPicker = useCallback(async () => {
+    const selection = await shopify.resourcePicker({
+      type: "collection",
+      multiple: true,
+      action: "add",
+      selectionIds: collections.map((c) => ({ id: c.id })),
+    });
+    if (!selection) return;
+    setCollections(
+      selection.map((collection: any) => ({
+        id: collection.id,
+        title: collection.title,
+        imageUrl: collection.image?.originalSrc ?? null,
+      })),
+    );
+  }, [shopify, collections]);
+
+  const addQbTier = useCallback(() => {
+    setQbTiers((current) => [
+      ...current,
+      {
+        tempKey: `new-${Date.now()}`,
+        quantity: "",
+        label: "",
+        badgeText: "",
+        badgeTone: "",
+        pricingType: "PERCENT_OFF",
+        pricingValue: "",
+        isDefault: current.length === 0,
+        items: [],
+      },
+    ]);
+  }, []);
+
+  const updateQbTier = useCallback((tempKey: string, patch: Partial<QbTierState>) => {
+    setQbTiers((current) =>
+      current.map((t) => (t.tempKey === tempKey ? { ...t, ...patch } : t)),
+    );
+  }, []);
+
+  const removeQbTier = useCallback((tempKey: string) => {
+    setQbTiers((current) => current.filter((t) => t.tempKey !== tempKey));
+  }, []);
+
+  const setQbTierDefault = useCallback((tempKey: string) => {
+    setQbTiers((current) => current.map((t) => ({ ...t, isDefault: t.tempKey === tempKey })));
+  }, []);
+
+  const openQbTierGiftPicker = useCallback(
+    async (tempKey: string) => {
+      const tier = qbTiers.find((t) => t.tempKey === tempKey);
+      const existingItems = tier?.items ?? [];
+      const selection = await shopify.resourcePicker({
+        type: "product",
+        multiple: true,
+        action: "add",
+        selectionIds: existingItems.map((i) =>
+          i.variantId ? { id: i.productId, variants: [{ id: i.variantId }] } : { id: i.productId },
+        ),
+      });
+      if (!selection) return;
+
+      const toPrice = (raw: unknown) => {
+        const price = parseFloat(String(raw));
+        return Number.isNaN(price) ? null : price;
+      };
+
+      setQbTiers((current) =>
+        current.map((t) => {
+          if (t.tempKey !== tempKey) return t;
+          const byKey = new Map(t.items.map((i) => [i.variantId ?? i.productId, i]));
+          const newItems = selection.flatMap((product: any) => {
+            const variants: any[] = product.variants?.length ? product.variants : [null];
+            return variants.map((variant) => {
+              const existing = byKey.get(variant?.id ?? product.id);
+              if (existing) return existing;
+              const hasRealTitle = variant?.title && variant.title !== "Default Title";
+              return {
+                productId: product.id,
+                variantId: variant?.id ?? null,
+                productTitle: hasRealTitle ? `${product.title} — ${variant.title}` : product.title,
+                productImageUrl: variant?.image?.originalSrc ?? product.images?.[0]?.originalSrc ?? null,
+                quantity: 1,
+                isGift: true,
+                price: toPrice(variant?.price),
+                missing: false,
+              };
+            });
+          });
+          return { ...t, items: newItems };
+        }),
+      );
+    },
+    [shopify, qbTiers],
+  );
+
+  const removeQbTierItem = useCallback((tempKey: string, key: string) => {
+    setQbTiers((current) =>
+      current.map((t) =>
+        t.tempKey === tempKey
+          ? { ...t, items: t.items.filter((i) => (i.variantId ?? i.productId) !== key) }
+          : t,
+      ),
+    );
+  }, []);
+
+  const editBundleProduct = useCallback(async () => {
+    const productId = bundle?.shopifyProductId;
+    if (!productId) return;
+    // Intents API opens Shopify's native product editor in a modal over the
+    // app; not yet in app-bridge-react types, and absent on older admin builds
+    const intents = (shopify as unknown as {
+      intents?: {
+        invoke: (
+          intent: string,
+          options: { value: string },
+        ) => Promise<{ complete: Promise<{ code: string }> }>;
+      };
+    }).intents;
+    if (!intents) {
+      open(`shopify://admin/products/${productId.split("/").pop()}`, "_top");
+      return;
+    }
+    const activity = await intents.invoke("edit:shopify/Product", {
+      value: productId,
+    });
+    await activity.complete;
+    revalidator.revalidate();
+  }, [shopify, bundle, revalidator]);
+
+  const onCopyBundleId = useCallback(() => {
+    if (!bundle) return;
+    navigator.clipboard.writeText(bundle.id);
+    shopify.toast.show("Bundle ID copied");
+  }, [shopify, bundle]);
+
+  const save = useCallback(() => {
+    const usesCollections = type !== "FIXED" && poolSource === "COLLECTIONS";
+    // QUANTITY_BREAKS only — every other type only ever has PRODUCTS/COLLECTIONS
+    const usesAllProducts = type === "QUANTITY_BREAKS" && poolSource === "ALL";
+    const collectionIds = usesCollections ? collections.map((c) => c.id) : [];
+    const slots = parseInt(slotCount, 10) || 0;
+    const payload = {
+      title,
+      description,
+      type,
+      status,
+      pricingType,
+      pricingValue: parseFloat(pricingValue) || 0,
+      widgetStyle,
+      widgetHeading,
+      accentColor,
+      showPrices,
+      itemSubtextTemplate,
+      showSubtextOnGifts,
+      freeShipping,
+      quantityBreakScope: poolSource,
+      // price/missing are editor-only display state — the DB schema doesn't store them
+      items:
+        type === "FIXED" || usesCollections || usesAllProducts
+          ? []
+          : items.map(({ price: _price, missing: _missing, ...item }) => item),
+      tiers:
+        type === "QUANTITY_BREAKS"
+          ? qbTiers.map((tier, position) => ({
+              id: tier.id,
+              quantity: parseInt(tier.quantity, 10) || 0,
+              label: tier.label.trim() || `Tier ${position + 1}`,
+              badgeText: tier.badgeText.trim() || null,
+              badgeTone: tier.badgeTone || null,
+              pricingType: tier.pricingType,
+              pricingValue: parseFloat(tier.pricingValue) || 0,
+              isDefault: tier.isDefault,
+              position,
+              // price/missing/isGift are editor-only display state — the DB
+              // schema doesn't store them (tier items are always free gifts)
+              items: tier.items.map(
+                ({ price: _price, missing: _missing, isGift: _isGift, ...item }, itemPosition) => ({
+                  ...item,
+                  position: itemPosition,
+                }),
+              ),
+            }))
+          : [],
+      packages:
+        type === "FIXED"
+          ? packages.map((pkg, position) => ({
+              id: pkg.id,
+              label: pkg.label,
+              badgeText: pkg.badgeText.trim() || null,
+              badgeTone: pkg.badgeTone || null,
+              position,
+              pricingType: pkg.pricingType,
+              pricingValue: parseFloat(pkg.pricingValue) || 0,
+              freeShipping: pkg.freeShipping,
+              items: pkg.items.map(({ price: _price, missing: _missing, ...item }) => item),
+            }))
+          : [],
+      rule:
+        type === "MIX_MATCH"
+          ? {
+              minItems: parseInt(minItems, 10) || 1,
+              maxItems: maxItems ? parseInt(maxItems, 10) : null,
+              discountTiers: tiers
+                .map((t) => ({
+                  quantity: parseInt(t.quantity, 10) || 0,
+                  discount: parseFloat(t.discount) || 0,
+                }))
+                .filter((t) => t.quantity > 0 && t.discount > 0),
+              collectionIds,
+            }
+          : type === "SLOT_BUILDER"
+            ? {
+                // Customers must fill every slot, so min = max = slot count
+                minItems: slots,
+                maxItems: slots,
+                discountTiers: [],
+                collectionIds,
+              }
+            : type === "QUANTITY_BREAKS" && usesCollections
+              ? { minItems: 1, maxItems: null, discountTiers: [], collectionIds }
+              : null,
+    };
+    fetcher.submit(
+      { payload: JSON.stringify(payload) },
+      { method: "POST" },
+    );
+  }, [
+    fetcher, title, description, type, status, pricingType, pricingValue,
+    widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
+    showSubtextOnGifts, freeShipping, items, packages, minItems, maxItems, tiers, poolSource,
+    collections, slotCount, qbTiers,
+  ]);
+
+  // Mirrors the compare-at math in publishFixedBundleProduct so merchants see
+  // exactly what will be set on the bundle product
+  const combinedPrice = useMemo(
+    () =>
+      Math.round(
+        paidItems.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0) * 100,
+      ) / 100,
+    [paidItems],
+  );
+  const hasMissingPrices = activeItems.some((i) => i.price == null);
+  const computedBundlePrice = useMemo(() => {
+    const value = parseFloat(activePricingValue) || 0;
+    let price: number;
+    if (activePricingType === "FIXED_PRICE") price = value;
+    else if (activePricingType === "PERCENT_OFF") price = combinedPrice * (1 - value / 100);
+    else price = combinedPrice - value;
+    return Math.max(0, Math.round(price * 100) / 100);
+  }, [activePricingType, activePricingValue, combinedPrice]);
+  const pricingValueError =
+    activePricingType === "PERCENT_OFF" && (parseFloat(activePricingValue) || 0) > 100
+      ? "Discount can't be more than 100%."
+      : (parseFloat(activePricingValue) || 0) < 0
+        ? "Value can't be negative."
+        : undefined;
+  const savings = Math.round((combinedPrice - computedBundlePrice) * 100) / 100;
+
+  const previewSummary = useMemo(() => {
+    if (type === "QUANTITY_BREAKS") {
+      const valid = qbTiers.filter((t) => t.quantity);
+      if (valid.length === 0) return "Add pack sizes";
+      return valid
+        .map((t) => {
+          const label = t.label.trim() || `${t.quantity} pack`;
+          if (!t.pricingValue) return label;
+          const priced =
+            t.pricingType === "PERCENT_OFF"
+              ? `${t.pricingValue}% off`
+              : t.pricingType === "AMOUNT_OFF"
+                ? `$${t.pricingValue} off`
+                : `$${t.pricingValue} each`;
+          return `${label} — ${priced}`;
+        })
+        .join(" · ");
+    }
+    if (type !== "MIX_MATCH") {
+      if (activePricingType === "FIXED_PRICE")
+        return activePricingValue ? `Bundle price: $${activePricingValue}` : "Set a bundle price";
+      if (activePricingType === "PERCENT_OFF")
+        return activePricingValue ? `${activePricingValue}% off combined price` : "Set a discount";
+      return activePricingValue ? `$${activePricingValue} off combined price` : "Set a discount";
+    }
+    const valid = tiers.filter((t) => t.quantity && t.discount);
+    if (valid.length === 0) return "Add discount tiers";
+    return valid
+      .map((t) => `Buy ${t.quantity}+ → ${t.discount}% off`)
+      .join(" · ");
+  }, [type, activePricingType, activePricingValue, tiers, qbTiers]);
+
+  const showCollectionPool = type !== "FIXED" && poolSource === "COLLECTIONS";
+  // QUANTITY_BREAKS only — every other type only ever has PRODUCTS/COLLECTIONS
+  const showAllProductsNotice = type === "QUANTITY_BREAKS" && poolSource === "ALL";
+
+  return (
+    <Page
+      backAction={{ content: "Home", url: "/app" }}
+      title={isNew ? "Create bundle" : title || "Edit bundle"}
+      titleMetadata={
+        status === "ACTIVE" ? <Badge tone="success">Active</Badge> : <Badge>Draft</Badge>
+      }
+      primaryAction={{
+        content: "Preview bundle",
+        disabled: !shopifyProduct?.previewUrl,
+        onAction: () => {
+          if (shopifyProduct?.previewUrl) open(shopifyProduct.previewUrl, "_blank");
+        },
+      }}
+      secondaryActions={
+        isNew
+          ? []
+          : [
+              {
+                content: "Delete",
+                destructive: true,
+                loading: deleteFetcher.state !== "idle",
+                onAction: () =>
+                  deleteFetcher.submit({ intent: "delete" }, { method: "POST" }),
+              },
+            ]
+      }
+    >
+      <TitleBar title={isNew ? "Create bundle" : "Edit bundle"} />
+      <SaveBar id="bundle-save-bar" open={isDirty || isSaving}>
+        <button
+          variant="primary"
+          onClick={save}
+          loading={isSaving ? "" : undefined}
+        >
+          Save
+        </button>
+        <button onClick={discard} disabled={isSaving}>
+          Discard
+        </button>
+      </SaveBar>
+      <BlockStack gap="500">
+        {errors && (
+          <Banner tone="critical" title="Couldn't save bundle">
+            <ul style={{ margin: 0, paddingLeft: "1rem" }}>
+              {errors.map((error) => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
+          </Banner>
+        )}
+
+        {(type === "FIXED"
+          ? packages.some((pkg) => pkg.items.some((i) => i.missing))
+          : items.some((i) => i.missing)) && (
+          <Banner tone="critical" title="Some products no longer exist">
+            <p>
+              Products marked &quot;Deleted from store&quot; were removed from
+              your Shopify catalog but are still part of this bundle, which
+              breaks checkout for it. Remove them below and save the bundle.
+            </p>
+          </Banner>
+        )}
+
+        <Layout>
+          <Layout.Section>
+            <BlockStack gap="400">
+              <Card>
+                <BlockStack gap="400">
+                  <Text as="h2" variant="headingMd">
+                    Details
+                  </Text>
+                  <TextField
+                    label="Title"
+                    value={title}
+                    onChange={setTitle}
+                    autoComplete="off"
+                    placeholder="e.g. Summer Essentials Kit"
+                  />
+                </BlockStack>
+              </Card>
+
+              {type === "FIXED" ? (
+                <Card>
+                  <BlockStack gap="400">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text as="h2" variant="headingMd">
+                        Packages
+                      </Text>
+                      <Button icon={PlusIcon} onClick={addPackage}>
+                        Add package
+                      </Button>
+                    </InlineStack>
+                    <PackagesTabsSection
+                      packages={packages}
+                      activePackageIndex={activePackageIndex}
+                      setActivePackageIndex={setActivePackageIndex}
+                      updateActivePackage={updateActivePackage}
+                      removeActivePackage={removeActivePackage}
+                    />
+                    <Divider />
+                    <ProductsSection
+                      type={type}
+                      poolSource={poolSource}
+                      setPoolSource={setPoolSource}
+                      showCollectionPool={showCollectionPool}
+                      showAllProductsNotice={showAllProductsNotice}
+                      collections={collections}
+                      setCollections={setCollections}
+                      paidItems={paidItems}
+                      setActiveItems={setActiveItems}
+                      openResourcePicker={openResourcePicker}
+                      openCollectionPicker={openCollectionPicker}
+                    />
+                    <Divider />
+                    <GiftsSection
+                      giftItems={giftItems}
+                      setActiveItems={setActiveItems}
+                      openResourcePicker={openResourcePicker}
+                      freeShipping={packages[activePackageIndex]?.freeShipping ?? false}
+                      onFreeShippingChange={(checked) =>
+                        updateActivePackage({ freeShipping: checked })
+                      }
+                    />
+                    <Divider />
+                    <PricingSection
+                      type={type}
+                      activePricingType={activePricingType}
+                      activePricingValue={activePricingValue}
+                      onPricingTypeChange={(value) =>
+                        type === "FIXED"
+                          ? updateActivePackage({ pricingType: value })
+                          : setPricingType(value)
+                      }
+                      onPricingValueChange={(value) =>
+                        type === "FIXED"
+                          ? updateActivePackage({ pricingValue: value })
+                          : setPricingValue(value)
+                      }
+                      pricingValueError={pricingValueError}
+                      paidItems={paidItems}
+                      combinedPrice={combinedPrice}
+                      computedBundlePrice={computedBundlePrice}
+                      savings={savings}
+                      hasMissingPrices={hasMissingPrices}
+                    />
+                  </BlockStack>
+                </Card>
+              ) : (
+                <>
+                  <Card>
+                    <ProductsSection
+                      type={type}
+                      poolSource={poolSource}
+                      setPoolSource={setPoolSource}
+                      showCollectionPool={showCollectionPool}
+                      showAllProductsNotice={showAllProductsNotice}
+                      collections={collections}
+                      setCollections={setCollections}
+                      paidItems={paidItems}
+                      setActiveItems={setActiveItems}
+                      openResourcePicker={openResourcePicker}
+                      openCollectionPicker={openCollectionPicker}
+                    />
+                  </Card>
+
+                  {type === "SLOT_BUILDER" && (
+                    <Card>
+                      <BlockStack gap="400">
+                        <Text as="h2" variant="headingMd">
+                          Slots
+                        </Text>
+                        <div style={{ maxWidth: 200 }}>
+                          <TextField
+                            label="Number of slots"
+                            type="number"
+                            min={2}
+                            value={slotCount}
+                            onChange={setSlotCount}
+                            autoComplete="off"
+                            helpText="Customers fill every slot to complete the bundle."
+                          />
+                        </div>
+                      </BlockStack>
+                    </Card>
+                  )}
+
+                  {type === "QUANTITY_BREAKS" ? (
+                    <>
+                      <Card>
+                        <QuantityBreaksTiersSection
+                          qbTiers={qbTiers}
+                          activeQbTierIndex={activeQbTierIndex}
+                          setActiveQbTierIndex={setActiveQbTierIndex}
+                          addQbTier={addQbTier}
+                          updateQbTier={updateQbTier}
+                          removeQbTier={removeQbTier}
+                          setQbTierDefault={setQbTierDefault}
+                          openQbTierGiftPicker={openQbTierGiftPicker}
+                          removeQbTierItem={removeQbTierItem}
+                        />
+                      </Card>
+                      <Card>
+                        <QuantityBreaksWidgetSection
+                          widgetHeading={widgetHeading}
+                          setWidgetHeading={setWidgetHeading}
+                          accentColor={accentColor}
+                          setAccentColor={setAccentColor}
+                        />
+                      </Card>
+                    </>
+                  ) : type !== "MIX_MATCH" ? (
+                    <Card>
+                      <PricingSection
+                        type={type}
+                        activePricingType={activePricingType}
+                        activePricingValue={activePricingValue}
+                        onPricingTypeChange={setPricingType}
+                        onPricingValueChange={setPricingValue}
+                        pricingValueError={pricingValueError}
+                        paidItems={paidItems}
+                        combinedPrice={combinedPrice}
+                        computedBundlePrice={computedBundlePrice}
+                        savings={savings}
+                        hasMissingPrices={hasMissingPrices}
+                      />
+                    </Card>
+                  ) : (
+                    <Card>
+                      <MixMatchRulesSection
+                        minItems={minItems}
+                        setMinItems={setMinItems}
+                        maxItems={maxItems}
+                        setMaxItems={setMaxItems}
+                        tiers={tiers}
+                        setTiers={setTiers}
+                      />
+                    </Card>
+                  )}
+                </>
+              )}
+
+              {type === "FIXED" && (
+                <Card>
+                  <FixedAppearanceSection
+                    widgetStyle={widgetStyle}
+                    setWidgetStyle={setWidgetStyle}
+                    accentColor={accentColor}
+                    setAccentColor={setAccentColor}
+                    widgetHeading={widgetHeading}
+                    setWidgetHeading={setWidgetHeading}
+                    showPrices={showPrices}
+                    setShowPrices={setShowPrices}
+                    itemSubtextTemplate={itemSubtextTemplate}
+                    setItemSubtextTemplate={setItemSubtextTemplate}
+                    showSubtextOnGifts={showSubtextOnGifts}
+                    setShowSubtextOnGifts={setShowSubtextOnGifts}
+                  />
+                </Card>
+              )}
+            </BlockStack>
+          </Layout.Section>
+
+          <Layout.Section variant="oneThird">
+            <PreviewSidebar
+              type={type}
+              title={title}
+              description={description}
+              status={status}
+              setStatus={setStatus}
+              showAllProductsNotice={showAllProductsNotice}
+              showCollectionPool={showCollectionPool}
+              collections={collections}
+              activeItems={activeItems}
+              itemCount={items.length}
+              previewSummary={previewSummary}
+              minItems={minItems}
+              maxItems={maxItems}
+              slotCount={slotCount}
+              isNew={isNew}
+              bundleId={bundle?.id}
+              shopifyProductId={bundle?.shopifyProductId}
+              shopifyProduct={shopifyProduct}
+              editBundleProduct={editBundleProduct}
+              onCopyBundleId={onCopyBundleId}
+            />
+          </Layout.Section>
+        </Layout>
+
+        {/* Breathing room below the last card; credit text can live here later */}
+        <Box paddingBlockEnd="1000" />
+      </BlockStack>
+    </Page>
+  );
+}
