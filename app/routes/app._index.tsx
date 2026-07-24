@@ -89,12 +89,14 @@ const typeLabel: Record<string, string> = {
   FIXED: "Fixed",
   SLOT_BUILDER: "Bundle builder",
   MIX_MATCH: "Mix & match",
+  QUANTITY_BREAKS: "Quantity breaks",
 };
 
-const typeTone: Record<string, "info" | "attention" | "magic"> = {
+const typeTone: Record<string, "info" | "attention" | "magic" | "success"> = {
   FIXED: "info",
   SLOT_BUILDER: "attention",
   MIX_MATCH: "magic",
+  QUANTITY_BREAKS: "success",
 };
 
 export default function Dashboard() {

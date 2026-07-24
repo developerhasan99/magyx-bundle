@@ -1,6 +1,6 @@
 import prisma from "../db.server";
 
-export type BundleType = "FIXED" | "SLOT_BUILDER" | "MIX_MATCH";
+export type BundleType = "FIXED" | "SLOT_BUILDER" | "MIX_MATCH" | "QUANTITY_BREAKS";
 export type BundleStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 export type PricingType = "FIXED_PRICE" | "PERCENT_OFF" | "AMOUNT_OFF";
 export type WidgetStyle = "numbered" | "grid" | "minimal";
@@ -23,6 +23,35 @@ export interface BundleItemInput {
 // FIXED bundles only: one alternate purchase option ("2 Pack", "3 Pack", ...)
 // under the bundle, each with its own items, gifts, pricing, and free
 // shipping — published as one variant on the bundle's Shopify product.
+// A free gift bundled with one quantity-break pack size — always $0 at
+// checkout, never the tier's own priced product (that's Bundle.items[0]).
+export interface TierItemInput {
+  productId: string;
+  variantId?: string | null;
+  productTitle: string;
+  productImageUrl?: string | null;
+  quantity: number;
+  position: number;
+}
+
+// QUANTITY_BREAKS bundles only: one selectable pack size, e.g. "1 pack" /
+// "2 pack" / "4 pack", each with its own per-unit pricing.
+export interface TierInput {
+  // Present when editing an already-saved tier; absent for one added in this
+  // edit session. Not otherwise significant — tiers carry no external
+  // Shopify id, so (unlike packages) they're simply deleted/recreated on save.
+  id?: string;
+  quantity: number;
+  label: string;
+  badgeText?: string | null;
+  badgeTone?: string | null;
+  pricingType: PricingType;
+  pricingValue: number;
+  isDefault: boolean;
+  position: number;
+  items: TierItemInput[];
+}
+
 export interface PackageInput {
   // Present when editing an already-saved package; absent for one added in
   // this edit session. Used to update the existing row in place (preserving
@@ -55,9 +84,13 @@ export interface BundleInput {
   showSubtextOnGifts: boolean;
   // FIXED bundles: waives shipping at checkout when this bundle is bought
   freeShipping: boolean;
+  // QUANTITY_BREAKS only: ALL | PRODUCTS | COLLECTIONS
+  quantityBreakScope: string;
   items: BundleItemInput[];
-  // FIXED bundles only; empty for MIX_MATCH/SLOT_BUILDER
+  // FIXED bundles only; empty for MIX_MATCH/SLOT_BUILDER/QUANTITY_BREAKS
   packages: PackageInput[];
+  // QUANTITY_BREAKS only; empty for every other type
+  tiers: TierInput[];
   rule?: {
     minItems: number;
     maxItems?: number | null;
@@ -73,10 +106,36 @@ const PACKAGES_INCLUDE = {
   },
 };
 
+const TIERS_INCLUDE = {
+  tiers: {
+    include: { items: { orderBy: { position: "asc" as const } } },
+    orderBy: { position: "asc" as const },
+  },
+};
+
+function tiersCreateData(tiers: TierInput[]) {
+  return tiers.map((tier) => ({
+    quantity: tier.quantity,
+    label: tier.label,
+    badgeText: tier.badgeText,
+    badgeTone: tier.badgeTone,
+    pricingType: tier.pricingType,
+    pricingValue: tier.pricingValue,
+    isDefault: tier.isDefault,
+    position: tier.position,
+    items: { create: tier.items },
+  }));
+}
+
 export function getBundles(shop: string) {
   return prisma.bundle.findMany({
     where: { shop },
-    include: { items: { orderBy: { position: "asc" } }, rule: true, ...PACKAGES_INCLUDE },
+    include: {
+      items: { orderBy: { position: "asc" } },
+      rule: true,
+      ...PACKAGES_INCLUDE,
+      ...TIERS_INCLUDE,
+    },
     orderBy: { updatedAt: "desc" },
   });
 }
@@ -84,7 +143,25 @@ export function getBundles(shop: string) {
 export function getBundle(shop: string, id: string) {
   return prisma.bundle.findFirst({
     where: { id, shop },
-    include: { items: { orderBy: { position: "asc" } }, rule: true, ...PACKAGES_INCLUDE },
+    include: {
+      items: { orderBy: { position: "asc" } },
+      rule: true,
+      ...PACKAGES_INCLUDE,
+      ...TIERS_INCLUDE,
+    },
+  });
+}
+
+// Used by the storefront app-proxy route to resolve whether the product a
+// shopper is viewing has an active quantity-break bundle. Scope (ALL /
+// PRODUCTS / COLLECTIONS) can't be filtered in this query — COLLECTIONS
+// membership needs a live Admin API call the route makes itself — so this
+// just returns every active QUANTITY_BREAKS bundle for the shop (typically a
+// small number) for the route to filter by scope.
+export function getActiveQuantityBreakBundles(shop: string) {
+  return prisma.bundle.findMany({
+    where: { shop, type: "QUANTITY_BREAKS", status: "ACTIVE" },
+    include: { items: true, rule: true, ...TIERS_INCLUDE },
   });
 }
 
@@ -118,8 +195,10 @@ export async function createBundle(shop: string, input: BundleInput) {
       itemSubtextTemplate: input.itemSubtextTemplate,
       showSubtextOnGifts: input.showSubtextOnGifts,
       freeShipping: input.freeShipping,
+      quantityBreakScope: input.quantityBreakScope,
       items: { create: input.items },
       packages: { create: packagesCreateData(input.packages) },
+      tiers: { create: tiersCreateData(input.tiers) },
       rule: input.rule
         ? {
             create: {
@@ -131,7 +210,7 @@ export async function createBundle(shop: string, input: BundleInput) {
           }
         : undefined,
     },
-    include: { items: true, rule: true, ...PACKAGES_INCLUDE },
+    include: { items: true, rule: true, ...PACKAGES_INCLUDE, ...TIERS_INCLUDE },
   });
 }
 
@@ -142,6 +221,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
   return prisma.$transaction(async (tx) => {
     await tx.bundleItem.deleteMany({ where: { bundleId: id } });
     await tx.bundleRule.deleteMany({ where: { bundleId: id } });
+    await tx.bundleTier.deleteMany({ where: { bundleId: id } });
 
     // Packages are upserted by id, not deleted/recreated like items/rule —
     // an existing package's `shopifyVariantId` must survive edits so the
@@ -200,7 +280,9 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         itemSubtextTemplate: input.itemSubtextTemplate,
         showSubtextOnGifts: input.showSubtextOnGifts,
         freeShipping: input.freeShipping,
+        quantityBreakScope: input.quantityBreakScope,
         items: { create: input.items },
+        tiers: { create: tiersCreateData(input.tiers) },
         rule: input.rule
           ? {
               create: {
@@ -212,7 +294,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
             }
           : undefined,
       },
-      include: { items: true, rule: true, ...PACKAGES_INCLUDE },
+      include: { items: true, rule: true, ...PACKAGES_INCLUDE, ...TIERS_INCLUDE },
     });
   });
 }

@@ -35,8 +35,14 @@ model Bundle {
   showSubtextOnGifts  Boolean  @default(true)
   // FIXED bundles: waives shipping at checkout when this bundle is bought
   freeShipping    Boolean      @default(false)
+  // QUANTITY_BREAKS only: which regular products the pack-size tiers apply
+  // to — ALL (every product), PRODUCTS (the explicit `items` below), or
+  // COLLECTIONS (every product in `rule.collectionIds`)
+  quantityBreakScope String    @default("PRODUCTS")
   items           BundleItem[]
   packages        BundlePackage[]
+  // QUANTITY_BREAKS only; see BundleTier below
+  tiers           BundleTier[]
   rule            BundleRule?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -44,6 +50,10 @@ model Bundle {
   @@index([shop, status])
 }
 
+// For QUANTITY_BREAKS bundles with quantityBreakScope = PRODUCTS, each row is
+// one of the (possibly many) regular products the tiers apply to (variantId
+// always null — tiers apply across all of a product's variants).
+// quantity/isGift/position are unused for that type.
 model BundleItem {
   id               String  @id @default(cuid())
   bundleId         String
@@ -55,6 +65,38 @@ model BundleItem {
   quantity         Int     @default(1)
   isGift           Boolean @default(false)
   position         Int     @default(0)
+}
+
+// QUANTITY_BREAKS bundles only: one selectable pack size ("1 pack", "2 pack",
+// "4 pack", ...) with its own per-unit pricing. Applies to whichever product
+// variant the shopper has selected on the storefront widget.
+model BundleTier {
+  id           String  @id @default(cuid())
+  bundleId     String
+  bundle       Bundle  @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  quantity     Int
+  label        String
+  badgeText    String?
+  badgeTone    String?
+  pricingType  String  @default("PERCENT_OFF") // FIXED_PRICE | PERCENT_OFF | AMOUNT_OFF — per unit
+  pricingValue Float   @default(0)
+  isDefault    Boolean @default(false)
+  position     Int     @default(0)
+  items        BundleTierItem[]
+}
+
+// A free gift bundled with a specific pack size — always $0 at checkout,
+// never the tier's own priced product (that's Bundle.items[0]).
+model BundleTierItem {
+  id              String     @id @default(cuid())
+  tierId          String
+  tier            BundleTier @relation(fields: [tierId], references: [id], onDelete: Cascade)
+  productId       String // Shopify product GID
+  variantId       String? // Shopify variant GID (null = any variant)
+  productTitle    String
+  productImageUrl String?
+  quantity        Int     @default(1)
+  position        Int     @default(0)
 }
 
 // FIXED bundles only: alternate purchase options under one bundle listing

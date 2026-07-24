@@ -1,0 +1,25 @@
+{%- comment -%}
+  Which product this applies to (and whether one applies at all) is decided
+  entirely in the Magyx Bundle app admin — merchants just add this block to
+  the product page template once; it self-hides on any product without an
+  active Quantity Breaks bundle. Nothing else is editable from the theme
+  editor, same convention as the Bundle Contents block.
+{%- endcomment -%}
+<div
+  class="magyx-quantity-breaks"
+  data-product-id="{{ product.id }}"
+  data-money-format="{{ shop.money_format | escape }}"
+  {{ block.shopify_attributes }}
+>
+  <div class="magyx-quantity-breaks__state"></div>
+</div>
+
+{% schema %}
+{
+  "name": "Quantity Breaks",
+  "target": "section",
+  "stylesheet": "magyx-bundle.css",
+  "javascript": "magyx-bundle-quantity-breaks.js",
+  "settings": []
+}
+{% endschema %}

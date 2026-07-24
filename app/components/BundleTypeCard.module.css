@@ -1,0 +1,45 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  text-align: left;
+  color: var(--p-color-text);
+  padding: var(--p-space-300);
+  border-radius: var(--p-border-radius-300);
+  border: 1px solid var(--p-color-border);
+  margin: 1px;
+  background: var(--p-color-bg-surface);
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.card:hover:not(:disabled) {
+  border-color: var(--p-color-border-emphasis);
+  box-shadow: var(--p-shadow-200);
+  transform: translateY(-2px);
+}
+
+.card:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.card:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.selected {
+  border: 2px solid var(--p-color-border-emphasis);
+  margin: 0;
+  background: var(--p-color-bg-surface-selected);
+}
+
+.selected:disabled {
+  opacity: 1;
+}

@@ -9,6 +9,11 @@
  * 2. MIX & MATCH bundles — cart lines tagged with the `_magyx_bundle_id`
  *    attribute are grouped per bundle; when the group reaches a discount
  *    tier from the shop config metafield, each line is repriced.
+ * 3. QUANTITY BREAKS bundles — cart lines are matched to whichever bundle's
+ *    scope covers their product (ALL / an explicit product list / a
+ *    resolved collection product list, no attribute needed) and grouped per
+ *    product; when a product's total quantity reaches a tier, its lines are
+ *    repriced per that tier's own pricing type.
  */
 
 const NO_CHANGES = { operations: [] };
@@ -26,6 +31,7 @@ export function run(input) {
   const config = parseJson(input.shop?.config?.value);
   if (config?.bundles?.length) {
     operations.push(...buildMixMatchOperations(input.cart.lines, config.bundles));
+    operations.push(...buildQuantityBreakOperations(input.cart.lines, config.bundles));
   }
 
   return operations.length ? { operations } : NO_CHANGES;
@@ -157,6 +163,121 @@ function buildMixMatchOperations(lines, bundles) {
     }
   }
   return operations;
+}
+
+function buildQuantityBreakOperations(lines, bundles) {
+  const qbBundles = bundles.filter((b) => b.type === "QUANTITY_BREAKS");
+  if (qbBundles.length === 0) return [];
+
+  // PRODUCTS/COLLECTIONS scope bundles are keyed by their resolved product
+  // id list (COLLECTIONS is already flattened into this list at sync time,
+  // since checkout can't check collection membership dynamically); ALL scope
+  // has no list and matches any product not already claimed by a more
+  // specific bundle.
+  const allScopeBundles = qbBundles.filter((b) => b.quantityBreakScope === "ALL");
+  const bundleByProductId = new Map();
+  for (const bundle of qbBundles) {
+    if (bundle.quantityBreakScope === "ALL") continue;
+    for (const productId of bundle.quantityBreakProductIds ?? []) {
+      if (!bundleByProductId.has(productId)) bundleByProductId.set(productId, bundle);
+    }
+  }
+
+  function bundleForProduct(productId) {
+    return bundleByProductId.get(productId) ?? allScopeBundles[0];
+  }
+
+  // Grouped by (bundle, productId): each eligible product qualifies for its
+  // pack-size tiers independently, purely off its own quantity in cart — not
+  // combined across different products, even ones the same bundle applies to.
+  /** @type {Map<string, { bundle: any, lines: any[] }>} */
+  const groups = new Map();
+  for (const line of lines) {
+    const productId = line.merchandise?.product?.id;
+    if (!productId) continue;
+    const bundle = bundleForProduct(productId);
+    if (!bundle) continue;
+    const key = bundle.id + ":" + productId;
+    const group = groups.get(key) ?? { bundle, lines: [] };
+    group.lines.push(line);
+    groups.set(key, group);
+  }
+
+  const operations = [];
+  for (const { bundle, lines: group } of groups.values()) {
+    const tiers = Array.isArray(bundle.tiers) ? bundle.tiers : [];
+    const totalQuantity = group.reduce((sum, l) => sum + l.quantity, 0);
+    const tier = tiers
+      .filter((t) => totalQuantity >= t.quantity)
+      .sort((a, b) => b.quantity - a.quantity)[0];
+    if (!tier) continue;
+
+    const gifts = Array.isArray(tier.giftVariantIds) ? tier.giftVariantIds : [];
+    // Gifts only ever ride along on one line in the group — attaching them
+    // to every line would duplicate the free product for shoppers who split
+    // their quantity across variants of the same product.
+    let giftsAttached = false;
+
+    for (const line of group) {
+      const original = parseFloat(line.cost.amountPerQuantity.amount);
+      const discounted = tierUnitPrice(original, tier);
+      const needsPriceChange = discounted != null && discounted < original;
+
+      if (gifts.length > 0 && !giftsAttached) {
+        giftsAttached = true;
+        operations.push({
+          expand: {
+            cartLineId: line.id,
+            expandedCartItems: [
+              {
+                merchandiseId: line.merchandise.id,
+                quantity: line.quantity,
+                price: {
+                  adjustment: {
+                    fixedPricePerUnit: {
+                      amount: (needsPriceChange ? discounted : original).toFixed(2),
+                    },
+                  },
+                },
+              },
+              ...gifts.map((gift) => ({
+                merchandiseId: gift.variantId,
+                quantity: gift.quantity ?? 1,
+                price: { adjustment: { fixedPricePerUnit: { amount: "0.00" } } },
+                attributes: [{ key: "Free Gift", value: "Yes" }],
+              })),
+            ],
+          },
+        });
+        continue;
+      }
+
+      if (needsPriceChange) {
+        operations.push({
+          update: {
+            cartLineId: line.id,
+            price: {
+              adjustment: {
+                fixedPricePerUnit: { amount: discounted.toFixed(2) },
+              },
+            },
+          },
+        });
+      }
+    }
+  }
+  return operations;
+}
+
+function tierUnitPrice(original, tier) {
+  if (tier.pricingType === "FIXED_PRICE") {
+    return Math.round(tier.pricingValue * 100) / 100;
+  }
+  if (tier.pricingType === "AMOUNT_OFF") {
+    return Math.max(0, Math.round((original - tier.pricingValue) * 100) / 100);
+  }
+  // PERCENT_OFF
+  return Math.round(original * (1 - tier.pricingValue / 100) * 100) / 100;
 }
 
 function parseJson(value) {

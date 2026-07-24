@@ -24,7 +24,7 @@ import {
 import { DeleteIcon, EditIcon, ImageIcon, PlusIcon } from "@shopify/polaris-icons";
 import { SaveBar, TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
-import { RadioIndicator } from "../components/BundleTypeCard";
+import { BundleTypeCard, RadioIndicator } from "../components/BundleTypeCard";
 import {
   createBundle,
   deleteBundle,
@@ -37,7 +37,7 @@ import {
   syncBundleConfigMetafield,
 } from "../models/shopify-sync.server";
 
-const CREATABLE_BUNDLE_TYPES = ["FIXED", "SLOT_BUILDER", "MIX_MATCH"];
+const CREATABLE_BUNDLE_TYPES = ["FIXED", "SLOT_BUILDER", "MIX_MATCH", "QUANTITY_BREAKS"];
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -49,7 +49,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       bundle: null,
       shopifyProduct: null,
       requestedType: CREATABLE_BUNDLE_TYPES.includes(requestedType ?? "")
-        ? (requestedType as "FIXED" | "SLOT_BUILDER" | "MIX_MATCH")
+        ? (requestedType as "FIXED" | "SLOT_BUILDER" | "MIX_MATCH" | "QUANTITY_BREAKS")
         : null,
     };
   }
@@ -105,6 +105,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       ...bundle.items.map((i) => i.variantId).filter((id): id is string => Boolean(id)),
       ...bundle.packages.flatMap((p) =>
         p.items.map((i) => i.variantId).filter((id): id is string => Boolean(id)),
+      ),
+      ...bundle.tiers.flatMap((t) =>
+        t.items.map((i) => i.variantId).filter((id): id is string => Boolean(id)),
       ),
     ]),
   );
@@ -185,6 +188,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       itemSubtextTemplate: bundle.itemSubtextTemplate,
       showSubtextOnGifts: bundle.showSubtextOnGifts,
       freeShipping: bundle.freeShipping,
+      quantityBreakScope: bundle.quantityBreakScope,
       items: bundle.items.map((i) => ({
         productId: i.productId,
         variantId: i.variantId,
@@ -218,6 +222,26 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         })),
       })),
       collections,
+      tiers: bundle.tiers.map((t) => ({
+        id: t.id,
+        quantity: t.quantity,
+        label: t.label,
+        badgeText: t.badgeText,
+        badgeTone: t.badgeTone,
+        pricingType: t.pricingType,
+        pricingValue: t.pricingValue,
+        isDefault: t.isDefault,
+        items: t.items.map((i) => ({
+          productId: i.productId,
+          variantId: i.variantId,
+          productTitle: i.productTitle,
+          productImageUrl: i.productImageUrl,
+          quantity: i.quantity,
+          price: i.variantId ? (priceByVariant.get(i.variantId) ?? null) : null,
+          missing:
+            pricesLoaded && Boolean(i.variantId) && !priceByVariant.has(i.variantId!),
+        })),
+      })),
       rule: bundle.rule
         ? {
             minItems: bundle.rule.minItems,
@@ -263,6 +287,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       if (pkg.pricingType === "PERCENT_OFF" && pkg.pricingValue > 100)
         errors.push(`"${label}" discount can't be more than 100%.`);
     });
+  } else if (payload.type === "QUANTITY_BREAKS") {
+    if (payload.quantityBreakScope === "PRODUCTS" && payload.items.length === 0)
+      errors.push("Select at least one product this applies to.");
+    if (
+      payload.quantityBreakScope === "COLLECTIONS" &&
+      (payload.rule?.collectionIds?.length ?? 0) === 0
+    )
+      errors.push("Select at least one collection this applies to.");
+    if ((payload.tiers?.length ?? 0) === 0) errors.push("Add at least one pack size.");
+    payload.tiers?.forEach((tier, i) => {
+      const label = tier.label?.trim() || `Tier ${i + 1}`;
+      if (!tier.quantity || tier.quantity < 1)
+        errors.push(`"${label}" needs a quantity of at least 1.`);
+      if (tier.pricingValue < 0) errors.push(`"${label}" pricing value can't be negative.`);
+      if (tier.pricingType === "PERCENT_OFF" && tier.pricingValue > 100)
+        errors.push(`"${label}" discount can't be more than 100%.`);
+    });
   } else {
     if (!hasPool)
       errors.push("Add products or select at least one collection for customers to pick from.");
@@ -286,6 +327,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       position,
       items: pkg.items.map((item, itemPosition) => ({ ...item, position: itemPosition })),
     })),
+    tiers: (payload.tiers ?? []).map((tier, position) => ({
+      ...tier,
+      position,
+      items: (tier.items ?? []).map((item, itemPosition) => ({ ...item, position: itemPosition })),
+    })),
+    // QUANTITY_BREAKS only sends a rule when scoped to collections (see
+    // save()'s payload construction) — falls through to payload.rule as-is.
     rule: payload.type === "FIXED" ? null : payload.rule,
   };
 
@@ -376,6 +424,61 @@ interface TierState {
   discount: string;
 }
 
+// QUANTITY_BREAKS bundles only: one selectable pack size.
+interface QbTierState {
+  // Prisma id once saved; absent for a tier added in this editing session
+  id?: string;
+  // Stable React key regardless of save state
+  tempKey: string;
+  quantity: string;
+  label: string;
+  badgeText: string;
+  badgeTone: string; // "" = no badge
+  pricingType: string;
+  pricingValue: string;
+  isDefault: boolean;
+  // Free gifts bundled with this pack size — always $0 at checkout
+  items: ItemState[];
+}
+
+function defaultQbTiers(): QbTierState[] {
+  return [
+    {
+      tempKey: "new-1",
+      quantity: "1",
+      label: "1 pack",
+      badgeText: "",
+      badgeTone: "",
+      pricingType: "PERCENT_OFF",
+      pricingValue: "0",
+      isDefault: false,
+      items: [],
+    },
+    {
+      tempKey: "new-2",
+      quantity: "2",
+      label: "2 pack",
+      badgeText: "Save 10%",
+      badgeTone: "success",
+      pricingType: "PERCENT_OFF",
+      pricingValue: "10",
+      isDefault: false,
+      items: [],
+    },
+    {
+      tempKey: "new-3",
+      quantity: "4",
+      label: "4 pack",
+      badgeText: "Best value",
+      badgeTone: "success",
+      pricingType: "PERCENT_OFF",
+      pricingValue: "20",
+      isDefault: true,
+      items: [],
+    },
+  ];
+}
+
 // FIXED bundles only: one alternate purchase option ("2 Pack", "3 Pack", ...)
 interface PackageState {
   // Prisma id once saved; absent for a package added in this editing session
@@ -403,6 +506,25 @@ function defaultPackageState(): PackageState {
     items: [],
   };
 }
+
+// QUANTITY_BREAKS only: which products the pack-size tiers apply to.
+const QUANTITY_BREAK_SCOPE_OPTIONS = [
+  {
+    label: "All products",
+    value: "ALL",
+    helpText: "Every product in your store gets these pack sizes.",
+  },
+  {
+    label: "A collection",
+    value: "COLLECTIONS",
+    helpText: "Every product in the chosen collections — stays up to date automatically.",
+  },
+  {
+    label: "Specific products",
+    value: "PRODUCTS",
+    helpText: "Hand-pick which products this applies to.",
+  },
+] as const;
 
 const BADGE_TONE_OPTIONS = [
   { label: "No badge", value: "" },
@@ -717,7 +839,15 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
           )
         : [defaultPackageState()],
     collections: (bundle?.collections ?? []) as CollectionState[],
-    poolSource: (bundle?.collections?.length ?? 0) > 0 ? "COLLECTIONS" : "PRODUCTS",
+    // QUANTITY_BREAKS persists its scope explicitly (it needs a distinct
+    // "ALL" value that can't be inferred from an empty items/collections
+    // list); every other type still infers it from whether collections exist.
+    poolSource:
+      bundle?.type === "QUANTITY_BREAKS"
+        ? (bundle.quantityBreakScope ?? "PRODUCTS")
+        : (bundle?.collections?.length ?? 0) > 0
+          ? "COLLECTIONS"
+          : "PRODUCTS",
     slotCount: String((bundle?.type === "SLOT_BUILDER" && bundle?.rule?.minItems) || 3),
     minItems: String((bundle?.type === "MIX_MATCH" && bundle?.rule?.minItems) || 2),
     maxItems: bundle?.rule?.maxItems ? String(bundle.rule.maxItems) : "",
@@ -728,6 +858,34 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
           discount: String(t.discount),
         }),
       ) ?? [{ quantity: "2", discount: "10" }],
+    qbTiers:
+      bundle?.tiers && bundle.tiers.length > 0
+        ? bundle.tiers.map(
+            (t): QbTierState => ({
+              id: t.id,
+              tempKey: t.id,
+              quantity: String(t.quantity),
+              label: t.label,
+              badgeText: t.badgeText ?? "",
+              badgeTone: t.badgeTone ?? "",
+              pricingType: t.pricingType,
+              pricingValue: String(t.pricingValue),
+              isDefault: t.isDefault,
+              items: t.items.map(
+                (i): ItemState => ({
+                  productId: i.productId,
+                  variantId: i.variantId ?? null,
+                  productTitle: i.productTitle,
+                  productImageUrl: i.productImageUrl ?? null,
+                  quantity: i.quantity,
+                  isGift: true,
+                  price: i.price ?? null,
+                  missing: i.missing ?? false,
+                }),
+              ),
+            }),
+          )
+        : defaultQbTiers(),
   };
 }
 
@@ -773,6 +931,8 @@ export default function BundleBuilder() {
   const [minItems, setMinItems] = useState(initialForm.minItems);
   const [maxItems, setMaxItems] = useState(initialForm.maxItems);
   const [tiers, setTiers] = useState<TierState[]>(initialForm.tiers);
+  const [qbTiers, setQbTiers] = useState<QbTierState[]>(initialForm.qbTiers);
+  const [activeQbTierIndex, setActiveQbTierIndex] = useState(0);
 
   // Keep the active tab in range when a package is added (select it) or
   // removed (fall back to the last remaining one)
@@ -785,6 +945,17 @@ export default function BundleBuilder() {
     }
     prevPackagesLengthRef.current = packages.length;
   }, [packages.length, activePackageIndex]);
+
+  // Same in-range/auto-select behavior as packages above, for pack-size tabs
+  const prevQbTiersLengthRef = useRef(qbTiers.length);
+  useEffect(() => {
+    if (qbTiers.length > prevQbTiersLengthRef.current) {
+      setActiveQbTierIndex(qbTiers.length - 1);
+    } else if (activeQbTierIndex >= qbTiers.length) {
+      setActiveQbTierIndex(Math.max(0, qbTiers.length - 1));
+    }
+    prevQbTiersLengthRef.current = qbTiers.length;
+  }, [qbTiers.length, activeQbTierIndex]);
 
   // FIXED bundles source their item list/pricing from the active package;
   // every other type keeps using the flat top-level state exactly as before
@@ -845,42 +1016,58 @@ export default function BundleBuilder() {
         title, type, status, pricingType, pricingValue, widgetStyle,
         widgetHeading, accentColor, showPrices, itemSubtextTemplate,
         showSubtextOnGifts, freeShipping, items, packages, collections, poolSource, slotCount,
-        minItems, maxItems, tiers,
+        minItems, maxItems, tiers, qbTiers,
       }) !== JSON.stringify(initialForm),
     [
       initialForm, title, type, status, pricingType, pricingValue,
       widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
       showSubtextOnGifts, freeShipping, items, packages, collections, poolSource, slotCount,
-      minItems, maxItems, tiers,
+      minItems, maxItems, tiers, qbTiers,
     ],
   );
 
+  // Shared by discard() (reset to the last-loaded state) and the post-save
+  // resync below (adopt the freshly-saved state, e.g. server-assigned ids for
+  // pack sizes/packages created in this session) — both are "make local
+  // editor state match a `formStateOf(...)` snapshot exactly."
+  // resetActiveTabs is false for the post-save resync so the user isn't
+  // knocked back to the first package/pack-size tab right after saving.
+  const applyFormState = useCallback(
+    (form: ReturnType<typeof formStateOf>, resetActiveTabs: boolean) => {
+      setTitle(form.title);
+      setType(form.type);
+      setStatus(form.status);
+      setPricingType(form.pricingType);
+      setPricingValue(form.pricingValue);
+      setWidgetStyle(form.widgetStyle);
+      setWidgetHeading(form.widgetHeading);
+      setAccentColor(form.accentColor);
+      setShowPrices(form.showPrices);
+      setItemSubtextTemplate(form.itemSubtextTemplate);
+      setShowSubtextOnGifts(form.showSubtextOnGifts);
+      setFreeShipping(form.freeShipping);
+      setItems(form.items);
+      setPackages(form.packages);
+      if (resetActiveTabs) setActivePackageIndex(0);
+      setCollections(form.collections);
+      setPoolSource(form.poolSource);
+      setSlotCount(form.slotCount);
+      setMinItems(form.minItems);
+      setMaxItems(form.maxItems);
+      setTiers(form.tiers);
+      setQbTiers(form.qbTiers);
+      if (resetActiveTabs) setActiveQbTierIndex(0);
+    },
+    [],
+  );
+
   const discard = useCallback(() => {
-    setTitle(initialForm.title);
-    setType(initialForm.type);
-    setStatus(initialForm.status);
-    setPricingType(initialForm.pricingType);
-    setPricingValue(initialForm.pricingValue);
-    setWidgetStyle(initialForm.widgetStyle);
-    setWidgetHeading(initialForm.widgetHeading);
-    setAccentColor(initialForm.accentColor);
-    setShowPrices(initialForm.showPrices);
-    setItemSubtextTemplate(initialForm.itemSubtextTemplate);
-    setShowSubtextOnGifts(initialForm.showSubtextOnGifts);
-    setFreeShipping(initialForm.freeShipping);
-    setItems(initialForm.items);
-    setPackages(initialForm.packages);
-    setActivePackageIndex(0);
-    setCollections(initialForm.collections);
-    setPoolSource(initialForm.poolSource);
-    setSlotCount(initialForm.slotCount);
-    setMinItems(initialForm.minItems);
-    setMaxItems(initialForm.maxItems);
-    setTiers(initialForm.tiers);
-  }, [initialForm]);
+    applyFormState(initialForm, true);
+  }, [initialForm, applyFormState]);
   const errors = fetcher.data && "errors" in fetcher.data ? fetcher.data.errors : null;
 
   const lastHandledSaveRef = useRef<typeof fetcher.data | null>(null);
+  const justSavedRef = useRef(false);
   useEffect(() => {
     if (
       fetcher.state === "idle" &&
@@ -890,9 +1077,27 @@ export default function BundleBuilder() {
     ) {
       lastHandledSaveRef.current = fetcher.data;
       shopify.toast.show("Bundle saved");
+      justSavedRef.current = true;
       revalidator.revalidate();
     }
   }, [fetcher.state, fetcher.data, shopify, revalidator]);
+
+  // Revalidating after a save re-fetches the bundle with server-assigned ids
+  // for anything created in this session (new packages, new pack-size
+  // tiers) — without this, local state keeps its id-less/temp-keyed copies,
+  // which never matches the freshly-loaded `initialForm` and leaves the
+  // save bar stuck open right after a successful save. Also covers the
+  // create flow, where the redirect to the new bundle's URL swaps `bundle`
+  // from null to the created record without remounting this component.
+  const prevBundleRef = useRef(bundle);
+  useEffect(() => {
+    const justCreated = prevBundleRef.current === null && bundle !== null;
+    if ((justSavedRef.current || justCreated) && bundle !== prevBundleRef.current) {
+      justSavedRef.current = false;
+      applyFormState(formStateOf(bundle, requestedType), false);
+    }
+    prevBundleRef.current = bundle;
+  }, [bundle, requestedType, applyFormState]);
 
   const openResourcePicker = useCallback(async (isGiftFlag: boolean) => {
     // Fixed bundles are variant-level: preselect the exact variants so the
@@ -927,6 +1132,9 @@ export default function BundleBuilder() {
       multiple: true,
       action: "add",
       selectionIds,
+      // QUANTITY_BREAKS applies across every variant of a product — there's
+      // nothing to pick at the variant level, so hide that UI entirely.
+      ...(type === "QUANTITY_BREAKS" ? { filter: { variants: false } } : {}),
     });
     if (!selection) return;
 
@@ -982,7 +1190,10 @@ export default function BundleBuilder() {
         (product: any) =>
           byProduct.get(product.id) ?? {
             productId: product.id,
-            variantId: product.variants?.[0]?.id ?? null,
+            // QUANTITY_BREAKS applies across every variant of the product —
+            // never pin to one, unlike MIX_MATCH which adds this specific
+            // variant to the cart when a shopper picks it.
+            variantId: type === "QUANTITY_BREAKS" ? null : (product.variants?.[0]?.id ?? null),
             productTitle: product.title,
             productImageUrl: product.images?.[0]?.originalSrc ?? null,
             quantity: 1,
@@ -1011,6 +1222,95 @@ export default function BundleBuilder() {
     );
   }, [shopify, collections]);
 
+  const addQbTier = useCallback(() => {
+    setQbTiers((current) => [
+      ...current,
+      {
+        tempKey: `new-${Date.now()}`,
+        quantity: "",
+        label: "",
+        badgeText: "",
+        badgeTone: "",
+        pricingType: "PERCENT_OFF",
+        pricingValue: "",
+        isDefault: current.length === 0,
+        items: [],
+      },
+    ]);
+  }, []);
+
+  const updateQbTier = useCallback((tempKey: string, patch: Partial<QbTierState>) => {
+    setQbTiers((current) =>
+      current.map((t) => (t.tempKey === tempKey ? { ...t, ...patch } : t)),
+    );
+  }, []);
+
+  const removeQbTier = useCallback((tempKey: string) => {
+    setQbTiers((current) => current.filter((t) => t.tempKey !== tempKey));
+  }, []);
+
+  const setQbTierDefault = useCallback((tempKey: string) => {
+    setQbTiers((current) => current.map((t) => ({ ...t, isDefault: t.tempKey === tempKey })));
+  }, []);
+
+  const openQbTierGiftPicker = useCallback(
+    async (tempKey: string) => {
+      const tier = qbTiers.find((t) => t.tempKey === tempKey);
+      const existingItems = tier?.items ?? [];
+      const selection = await shopify.resourcePicker({
+        type: "product",
+        multiple: true,
+        action: "add",
+        selectionIds: existingItems.map((i) =>
+          i.variantId ? { id: i.productId, variants: [{ id: i.variantId }] } : { id: i.productId },
+        ),
+      });
+      if (!selection) return;
+
+      const toPrice = (raw: unknown) => {
+        const price = parseFloat(String(raw));
+        return Number.isNaN(price) ? null : price;
+      };
+
+      setQbTiers((current) =>
+        current.map((t) => {
+          if (t.tempKey !== tempKey) return t;
+          const byKey = new Map(t.items.map((i) => [i.variantId ?? i.productId, i]));
+          const newItems = selection.flatMap((product: any) => {
+            const variants: any[] = product.variants?.length ? product.variants : [null];
+            return variants.map((variant) => {
+              const existing = byKey.get(variant?.id ?? product.id);
+              if (existing) return existing;
+              const hasRealTitle = variant?.title && variant.title !== "Default Title";
+              return {
+                productId: product.id,
+                variantId: variant?.id ?? null,
+                productTitle: hasRealTitle ? `${product.title} — ${variant.title}` : product.title,
+                productImageUrl: variant?.image?.originalSrc ?? product.images?.[0]?.originalSrc ?? null,
+                quantity: 1,
+                isGift: true,
+                price: toPrice(variant?.price),
+                missing: false,
+              };
+            });
+          });
+          return { ...t, items: newItems };
+        }),
+      );
+    },
+    [shopify, qbTiers],
+  );
+
+  const removeQbTierItem = useCallback((tempKey: string, key: string) => {
+    setQbTiers((current) =>
+      current.map((t) =>
+        t.tempKey === tempKey
+          ? { ...t, items: t.items.filter((i) => (i.variantId ?? i.productId) !== key) }
+          : t,
+      ),
+    );
+  }, []);
+
   const editBundleProduct = useCallback(async () => {
     const productId = bundle?.shopifyProductId;
     if (!productId) return;
@@ -1037,6 +1337,8 @@ export default function BundleBuilder() {
 
   const save = useCallback(() => {
     const usesCollections = type !== "FIXED" && poolSource === "COLLECTIONS";
+    // QUANTITY_BREAKS only — every other type only ever has PRODUCTS/COLLECTIONS
+    const usesAllProducts = type === "QUANTITY_BREAKS" && poolSource === "ALL";
     const collectionIds = usesCollections ? collections.map((c) => c.id) : [];
     const slots = parseInt(slotCount, 10) || 0;
     const payload = {
@@ -1053,11 +1355,34 @@ export default function BundleBuilder() {
       itemSubtextTemplate,
       showSubtextOnGifts,
       freeShipping,
+      quantityBreakScope: poolSource,
       // price/missing are editor-only display state — the DB schema doesn't store them
       items:
-        type === "FIXED" || usesCollections
+        type === "FIXED" || usesCollections || usesAllProducts
           ? []
           : items.map(({ price: _price, missing: _missing, ...item }) => item),
+      tiers:
+        type === "QUANTITY_BREAKS"
+          ? qbTiers.map((tier, position) => ({
+              id: tier.id,
+              quantity: parseInt(tier.quantity, 10) || 0,
+              label: tier.label.trim() || `Tier ${position + 1}`,
+              badgeText: tier.badgeText.trim() || null,
+              badgeTone: tier.badgeTone || null,
+              pricingType: tier.pricingType,
+              pricingValue: parseFloat(tier.pricingValue) || 0,
+              isDefault: tier.isDefault,
+              position,
+              // price/missing/isGift are editor-only display state — the DB
+              // schema doesn't store them (tier items are always free gifts)
+              items: tier.items.map(
+                ({ price: _price, missing: _missing, isGift: _isGift, ...item }, itemPosition) => ({
+                  ...item,
+                  position: itemPosition,
+                }),
+              ),
+            }))
+          : [],
       packages:
         type === "FIXED"
           ? packages.map((pkg, position) => ({
@@ -1093,7 +1418,9 @@ export default function BundleBuilder() {
                 discountTiers: [],
                 collectionIds,
               }
-            : null,
+            : type === "QUANTITY_BREAKS" && usesCollections
+              ? { minItems: 1, maxItems: null, discountTiers: [], collectionIds }
+              : null,
     };
     fetcher.submit(
       { payload: JSON.stringify(payload) },
@@ -1103,7 +1430,7 @@ export default function BundleBuilder() {
     fetcher, title, description, type, status, pricingType, pricingValue,
     widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
     showSubtextOnGifts, freeShipping, items, packages, minItems, maxItems, tiers, poolSource,
-    collections, slotCount,
+    collections, slotCount, qbTiers,
   ]);
 
   // Mirrors the compare-at math in publishFixedBundleProduct so merchants see
@@ -1133,6 +1460,23 @@ export default function BundleBuilder() {
   const savings = Math.round((combinedPrice - computedBundlePrice) * 100) / 100;
 
   const previewSummary = useMemo(() => {
+    if (type === "QUANTITY_BREAKS") {
+      const valid = qbTiers.filter((t) => t.quantity);
+      if (valid.length === 0) return "Add pack sizes";
+      return valid
+        .map((t) => {
+          const label = t.label.trim() || `${t.quantity} pack`;
+          if (!t.pricingValue) return label;
+          const priced =
+            t.pricingType === "PERCENT_OFF"
+              ? `${t.pricingValue}% off`
+              : t.pricingType === "AMOUNT_OFF"
+                ? `$${t.pricingValue} off`
+                : `$${t.pricingValue} each`;
+          return `${label} — ${priced}`;
+        })
+        .join(" · ");
+    }
     if (type !== "MIX_MATCH") {
       if (activePricingType === "FIXED_PRICE")
         return activePricingValue ? `Bundle price: $${activePricingValue}` : "Set a bundle price";
@@ -1145,9 +1489,11 @@ export default function BundleBuilder() {
     return valid
       .map((t) => `Buy ${t.quantity}+ → ${t.discount}% off`)
       .join(" · ");
-  }, [type, activePricingType, activePricingValue, tiers]);
+  }, [type, activePricingType, activePricingValue, tiers, qbTiers]);
 
   const showCollectionPool = type !== "FIXED" && poolSource === "COLLECTIONS";
+  // QUANTITY_BREAKS only — every other type only ever has PRODUCTS/COLLECTIONS
+  const showAllProductsNotice = type === "QUANTITY_BREAKS" && poolSource === "ALL";
 
   // Extracted so FIXED bundles can render these inside the single "Packages"
   // card while MIX_MATCH/SLOT_BUILDER keep them as their own separate cards.
@@ -1155,43 +1501,77 @@ export default function BundleBuilder() {
     <BlockStack gap="400">
       <InlineStack align="space-between" blockAlign="center">
         <Text as="h2" variant="headingMd">
-          {type === "FIXED" ? "Products in bundle" : "Product pool"}
+          {type === "FIXED"
+            ? "Products in bundle"
+            : type === "QUANTITY_BREAKS"
+              ? "Applies to"
+              : "Product pool"}
         </Text>
-        {showCollectionPool ? (
-          <Button icon={PlusIcon} onClick={openCollectionPicker}>
-            Add collections
-          </Button>
-        ) : (
-          <Button icon={PlusIcon} onClick={() => openResourcePicker(false)}>
-            Add products
-          </Button>
-        )}
+        {!showAllProductsNotice &&
+          (showCollectionPool ? (
+            <Button icon={PlusIcon} onClick={openCollectionPicker}>
+              Add collections
+            </Button>
+          ) : (
+            <Button icon={PlusIcon} onClick={() => openResourcePicker(false)}>
+              Add products
+            </Button>
+          ))}
       </InlineStack>
-      {type !== "FIXED" && (
-        <ChoiceList
-          title="Customers pick from"
-          choices={[
-            {
-              label: "Specific products",
-              value: "PRODUCTS",
-              helpText: "Hand-pick the products shown in the selection panel.",
-            },
-            {
-              label: "Collections",
-              value: "COLLECTIONS",
-              helpText:
-                "Show every product from the chosen collections — stays up to date automatically.",
-            },
-          ]}
-          selected={[poolSource]}
-          onChange={(value) => setPoolSource(value[0])}
-        />
+      {type === "QUANTITY_BREAKS" ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            gap: "var(--p-space-300)",
+          }}
+        >
+          {QUANTITY_BREAK_SCOPE_OPTIONS.map((option) => (
+            <BundleTypeCard
+              key={option.value}
+              label={option.label}
+              description={option.helpText}
+              selected={poolSource === option.value}
+              disabled={false}
+              onSelect={() => setPoolSource(option.value)}
+            />
+          ))}
+        </div>
+      ) : (
+        type !== "FIXED" && (
+          <ChoiceList
+            title="Customers pick from"
+            choices={[
+              {
+                label: "Specific products",
+                value: "PRODUCTS",
+                helpText: "Hand-pick the products shown in the selection panel.",
+              },
+              {
+                label: "Collections",
+                value: "COLLECTIONS",
+                helpText:
+                  "Show every product from the chosen collections — stays up to date automatically.",
+              },
+            ]}
+            selected={[poolSource]}
+            onChange={(value) => setPoolSource(value[0])}
+          />
+        )
       )}
-      {showCollectionPool ? (
+      {showAllProductsNotice ? (
+        <Box padding="400">
+          <Text as="p" tone="subdued" alignment="center">
+            These pack sizes will be available on every product in your store.
+          </Text>
+        </Box>
+      ) : showCollectionPool ? (
         collections.length === 0 ? (
           <Box padding="400">
             <Text as="p" tone="subdued" alignment="center">
-              Select the collections customers can pick products from.
+              {type === "QUANTITY_BREAKS"
+                ? "Select the collection(s) this applies to."
+                : "Select the collections customers can pick products from."}
             </Text>
           </Box>
         ) : (
@@ -1236,7 +1616,9 @@ export default function BundleBuilder() {
           <Text as="p" tone="subdued" alignment="center">
             {type === "FIXED"
               ? "Add the products this bundle contains."
-              : "Add the products customers can pick from."}
+              : type === "QUANTITY_BREAKS"
+                ? "Add the products this applies to."
+                : "Add the products customers can pick from."}
           </Text>
         </Box>
       ) : (
@@ -1591,6 +1973,263 @@ export default function BundleBuilder() {
     </>
   );
 
+  const accentColorPicker = (
+    <BlockStack gap="100">
+      <Text as="span" variant="bodyMd">
+        Accent color
+      </Text>
+      <InlineStack gap="200" blockAlign="center" wrap={false}>
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            flexShrink: 0,
+            borderRadius: 8,
+            overflow: "hidden",
+            border: "1px solid var(--p-color-border)",
+          }}
+        >
+          <input
+            type="color"
+            value={/^#[0-9a-fA-F]{6}$/.test(accentColor) ? accentColor : "#1a1a1a"}
+            onChange={(event) => setAccentColor(event.target.value)}
+            aria-label="Accent color"
+            style={{
+              width: "calc(100% + 16px)",
+              height: "calc(100% + 16px)",
+              margin: -8,
+              padding: 0,
+              border: "none",
+              cursor: "pointer",
+            }}
+          />
+        </div>
+        <div style={{ width: 110 }}>
+          <TextField
+            label="Accent color"
+            labelHidden
+            value={accentColor}
+            onChange={setAccentColor}
+            autoComplete="off"
+          />
+        </div>
+      </InlineStack>
+    </BlockStack>
+  );
+
+
+  const qbTiersTabsSection = qbTiers.length > 1 && (
+    <InlineStack gap="200" wrap>
+      {qbTiers.map((tier, index) => (
+        <PackageTab
+          key={tier.tempKey}
+          label={tier.label || `Pack ${index + 1}`}
+          badgeText={tier.badgeText}
+          badgeTone={tier.badgeTone}
+          selected={index === activeQbTierIndex}
+          onSelect={() => setActiveQbTierIndex(index)}
+        />
+      ))}
+    </InlineStack>
+  );
+
+  const activeQbTier = qbTiers[activeQbTierIndex];
+
+  const qbTiersSection = (
+    <BlockStack gap="400">
+      <InlineStack align="space-between" blockAlign="center">
+        <Text as="h2" variant="headingMd">
+          Pack sizes
+        </Text>
+        <Button icon={PlusIcon} onClick={addQbTier}>
+          Add pack size
+        </Button>
+      </InlineStack>
+      {!activeQbTier ? (
+        <Box padding="400">
+          <Text as="p" tone="subdued" alignment="center">
+            Add the pack sizes customers can choose from.
+          </Text>
+        </Box>
+      ) : (
+        <BlockStack gap="400">
+          {qbTiersTabsSection}
+
+          <InlineStack align="space-between" blockAlign="center">
+            {activeQbTier.isDefault ? (
+              <Badge tone="success">Default selection</Badge>
+            ) : (
+              <Button variant="plain" onClick={() => setQbTierDefault(activeQbTier.tempKey)}>
+                Set as default selection
+              </Button>
+            )}
+            <Button
+              icon={DeleteIcon}
+              variant="tertiary"
+              tone="critical"
+              disabled={qbTiers.length <= 1}
+              onClick={() => removeQbTier(activeQbTier.tempKey)}
+            >
+              Remove pack size
+            </Button>
+          </InlineStack>
+
+          <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
+            <TextField
+              label="Quantity"
+              type="number"
+              min={1}
+              value={activeQbTier.quantity}
+              onChange={(value) => updateQbTier(activeQbTier.tempKey, { quantity: value })}
+              autoComplete="off"
+            />
+            <TextField
+              label="Label"
+              value={activeQbTier.label}
+              onChange={(value) => updateQbTier(activeQbTier.tempKey, { label: value })}
+              autoComplete="off"
+              placeholder="e.g. 2 pack"
+            />
+          </InlineGrid>
+
+          <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
+            <Select
+              label="Pricing"
+              options={[
+                { label: "Percent off", value: "PERCENT_OFF" },
+                { label: "Amount off", value: "AMOUNT_OFF" },
+                { label: "Fixed price per unit", value: "FIXED_PRICE" },
+              ]}
+              value={activeQbTier.pricingType}
+              onChange={(value) => updateQbTier(activeQbTier.tempKey, { pricingType: value })}
+            />
+            <TextField
+              label={
+                activeQbTier.pricingType === "PERCENT_OFF"
+                  ? "Discount"
+                  : activeQbTier.pricingType === "AMOUNT_OFF"
+                    ? "Amount off"
+                    : "Price per unit"
+              }
+              type="number"
+              min={0}
+              max={activeQbTier.pricingType === "PERCENT_OFF" ? 100 : undefined}
+              value={activeQbTier.pricingValue}
+              onChange={(value) => updateQbTier(activeQbTier.tempKey, { pricingValue: value })}
+              autoComplete="off"
+              prefix={activeQbTier.pricingType === "PERCENT_OFF" ? undefined : "$"}
+              suffix={activeQbTier.pricingType === "PERCENT_OFF" ? "%" : undefined}
+            />
+          </InlineGrid>
+
+          <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
+            <Select
+              label="Badge"
+              options={BADGE_TONE_OPTIONS}
+              value={activeQbTier.badgeTone}
+              onChange={(value) => updateQbTier(activeQbTier.tempKey, { badgeTone: value })}
+            />
+            <TextField
+              label="Badge text"
+              value={activeQbTier.badgeText}
+              onChange={(value) => updateQbTier(activeQbTier.tempKey, { badgeText: value })}
+              autoComplete="off"
+              placeholder="e.g. Save 20%"
+            />
+          </InlineGrid>
+
+          <Divider />
+
+          <BlockStack gap="200">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="h3" variant="headingXs">
+                Free gifts
+              </Text>
+              <Button
+                variant="plain"
+                icon={PlusIcon}
+                onClick={() => openQbTierGiftPicker(activeQbTier.tempKey)}
+              >
+                Add free gift
+              </Button>
+            </InlineStack>
+            {activeQbTier.items.length === 0 ? (
+              <Text as="p" variant="bodySm" tone="subdued">
+                No free gifts for this pack size.
+              </Text>
+            ) : (
+              <BlockStack gap="200">
+                {activeQbTier.items.map((item) => (
+                  <InlineStack
+                    key={item.variantId ?? item.productId}
+                    gap="300"
+                    blockAlign="center"
+                    align="space-between"
+                    wrap={false}
+                  >
+                    <InlineStack gap="300" blockAlign="center" wrap={false}>
+                      <Thumbnail
+                        source={item.productImageUrl || ImageIcon}
+                        alt={item.productTitle}
+                        size="small"
+                      />
+                      <BlockStack gap="050">
+                        <InlineStack gap="200" blockAlign="center">
+                          <Text as="span" variant="bodyMd" fontWeight="medium">
+                            {item.productTitle}
+                          </Text>
+                          {item.missing && (
+                            <Badge tone="critical">Deleted from store</Badge>
+                          )}
+                        </InlineStack>
+                        <Badge tone="success" size="small">
+                          Free gift
+                        </Badge>
+                      </BlockStack>
+                    </InlineStack>
+                    <Button
+                      icon={DeleteIcon}
+                      variant="tertiary"
+                      tone="critical"
+                      accessibilityLabel={`Remove ${item.productTitle}`}
+                      onClick={() =>
+                        removeQbTierItem(activeQbTier.tempKey, item.variantId ?? item.productId)
+                      }
+                    />
+                  </InlineStack>
+                ))}
+              </BlockStack>
+            )}
+          </BlockStack>
+        </BlockStack>
+      )}
+    </BlockStack>
+  );
+
+  const qbWidgetSection = (
+    <BlockStack gap="400">
+      <Text as="h2" variant="headingMd">
+        Storefront widget
+      </Text>
+      <Text as="p" variant="bodySm" tone="subdued">
+        Add the &quot;Quantity Breaks&quot; block to your product page template
+        once in the theme editor — it shows automatically on this product
+        while the bundle is Active. Nothing else to configure per product.
+      </Text>
+      <InlineStack gap="400" wrap>
+        <div style={{ minWidth: 220, flex: 1 }}>
+          <TextField
+            label="Heading"
+            value={widgetHeading}
+            onChange={setWidgetHeading}
+            autoComplete="off"
+          />
+        </div>
+        {accentColorPicker}
+      </InlineStack>
+    </BlockStack>
+  );
+
   return (
     <Page
       backAction={{ content: "Home", url: "/app" }}
@@ -1718,7 +2357,12 @@ export default function BundleBuilder() {
                     </Card>
                   )}
 
-                  {type !== "MIX_MATCH" ? (
+                  {type === "QUANTITY_BREAKS" ? (
+                    <>
+                      <Card>{qbTiersSection}</Card>
+                      <Card>{qbWidgetSection}</Card>
+                    </>
+                  ) : type !== "MIX_MATCH" ? (
                     <Card>{pricingSection}</Card>
                   ) : (
                     <Card>
@@ -1937,14 +2581,18 @@ export default function BundleBuilder() {
                         ? "info"
                         : type === "SLOT_BUILDER"
                           ? "attention"
-                          : "magic"
+                          : type === "QUANTITY_BREAKS"
+                            ? "success"
+                            : "magic"
                     }
                   >
                     {type === "FIXED"
                       ? "Fixed"
                       : type === "SLOT_BUILDER"
                         ? "Bundle builder"
-                        : "Mix & match"}
+                        : type === "QUANTITY_BREAKS"
+                          ? "Quantity breaks"
+                          : "Mix & match"}
                   </Badge>
                 </InlineStack>
                 <Divider />
@@ -1957,7 +2605,11 @@ export default function BundleBuilder() {
                   </Text>
                 )}
                 <BlockStack gap="200">
-                  {showCollectionPool ? (
+                  {showAllProductsNotice ? (
+                    <Text as="span" variant="bodySm" tone="subdued">
+                      All products
+                    </Text>
+                  ) : showCollectionPool ? (
                     <>
                       {collections.map((collection) => (
                         <InlineStack
@@ -2033,6 +2685,17 @@ export default function BundleBuilder() {
                     .
                   </Text>
                 )}
+                {type === "QUANTITY_BREAKS" && (
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Applies across every variant of{" "}
+                    {showAllProductsNotice
+                      ? "every product in your store"
+                      : showCollectionPool
+                        ? `${collections.length} collection${collections.length === 1 ? "" : "s"}`
+                        : `${items.length} product${items.length === 1 ? "" : "s"}`}
+                    .
+                  </Text>
+                )}
               </BlockStack>
             </Card>
             <Box paddingBlockStart="400">
@@ -2055,7 +2718,9 @@ export default function BundleBuilder() {
                       ? "When set to Active, Magyx Bundle creates a bundle product in your store. It's expanded into its components at checkout, so inventory stays accurate."
                       : type === "SLOT_BUILDER"
                         ? "When set to Active, this bundle gets its own product page where customers fill each slot from your product pool. Storefront widget support is coming next."
-                        : "When set to Active, the mix & match builder becomes available as an app block in your theme editor, and discounts apply automatically at checkout."}
+                        : type === "QUANTITY_BREAKS"
+                          ? "When set to Active, the quantity breaks widget shows automatically on this product's page once you've added the theme block — no separate product is created, and discounts apply automatically at checkout."
+                          : "When set to Active, the mix & match builder becomes available as an app block in your theme editor, and discounts apply automatically at checkout."}
                   </Text>
                   {!isNew && type === "FIXED" && bundle!.shopifyProductId && (
                     shopifyProduct ? (

@@ -33,7 +33,6 @@ const BUNDLE_TYPE_CHOICES = [
     label: "Quantity breaks",
     description:
       "Reward customers with a bigger discount the more of one product they buy.",
-    comingSoon: true,
   },
 ] as const;
 
@@ -68,8 +67,7 @@ export default function CreateBundle() {
                     label={option.label}
                     description={option.description}
                     selected={false}
-                    disabled={"comingSoon" in option && option.comingSoon}
-                    badge={"comingSoon" in option && option.comingSoon ? "Coming soon" : undefined}
+                    disabled={false}
                     onSelect={() => navigate(`/app/bundles/new?type=${option.value}`)}
                   />
                 ))}

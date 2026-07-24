@@ -14,28 +14,63 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
   const bundles = await getBundles(shop);
   const active = bundles.filter((b) => b.status === "ACTIVE");
 
-  const config = {
-    bundles: active.map((b) => ({
-      id: b.id,
-      type: b.type,
-      pricingType: b.pricingType,
-      pricingValue: b.pricingValue,
-      shopifyProductId: b.shopifyProductId,
-      items: b.items.map((i) => ({
-        productId: i.productId,
-        variantId: i.variantId,
-        quantity: i.quantity,
-      })),
-      rule: b.rule
-        ? {
-            minItems: b.rule.minItems,
-            maxItems: b.rule.maxItems,
-            discountTiers: JSON.parse(b.rule.discountTiers),
-            collectionIds: JSON.parse(b.rule.collectionIds),
-          }
-        : null,
-    })),
-  };
+  const bundlesConfig = await Promise.all(
+    active.map(async (b) => {
+      // QUANTITY_BREAKS: the Cart Transform function has no way to check
+      // collection membership dynamically at checkout (Shopify Functions
+      // require collection ids baked into the deployed query), so ALL/
+      // COLLECTIONS scope is resolved into a concrete product id list here,
+      // at sync time — PRODUCTS scope already is one. This means a product
+      // added to a scoped collection won't get the discount until the next
+      // sync (any bundle save, or an activate/deactivate from the bundle list).
+      let quantityBreakProductIds: string[] | undefined;
+      if (b.type === "QUANTITY_BREAKS" && b.quantityBreakScope === "PRODUCTS") {
+        quantityBreakProductIds = b.items.map((i) => i.productId);
+      } else if (b.type === "QUANTITY_BREAKS" && b.quantityBreakScope === "COLLECTIONS") {
+        const collectionIds: string[] = b.rule ? JSON.parse(b.rule.collectionIds) : [];
+        quantityBreakProductIds = await resolveCollectionProductIds(admin, collectionIds);
+      }
+
+      return {
+        id: b.id,
+        type: b.type,
+        pricingType: b.pricingType,
+        pricingValue: b.pricingValue,
+        shopifyProductId: b.shopifyProductId,
+        items: b.items.map((i) => ({
+          productId: i.productId,
+          variantId: i.variantId,
+          quantity: i.quantity,
+        })),
+        quantityBreakScope: b.type === "QUANTITY_BREAKS" ? b.quantityBreakScope : undefined,
+        // ALL scope needs no list — every product matches
+        quantityBreakProductIds,
+        tiers:
+          b.type === "QUANTITY_BREAKS"
+            ? b.tiers.map((t) => ({
+                quantity: t.quantity,
+                pricingType: t.pricingType,
+                pricingValue: t.pricingValue,
+                // Free gifts bundled with this pack size — the Cart Transform
+                // function expands the qualifying line to add these at $0.
+                giftVariantIds: t.items
+                  .filter((i) => i.variantId)
+                  .map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
+              }))
+            : undefined,
+        rule: b.rule
+          ? {
+              minItems: b.rule.minItems,
+              maxItems: b.rule.maxItems,
+              discountTiers: JSON.parse(b.rule.discountTiers),
+              collectionIds: JSON.parse(b.rule.collectionIds),
+            }
+          : null,
+      };
+    }),
+  );
+
+  const config = { bundles: bundlesConfig };
 
   const shopIdResponse = await admin.graphql(`#graphql
     query shopId { shop { id } }`);
@@ -77,6 +112,53 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
   if (active.some((b) => b.freeShipping || b.packages.some((p) => p.freeShipping))) {
     await ensureFreeShippingDiscountActivated(admin);
   }
+}
+
+/**
+ * Flattens every product in the given collections into a single deduped list
+ * of product GIDs. Used to resolve a QUANTITY_BREAKS bundle's COLLECTIONS
+ * scope into the concrete id list the Cart Transform function needs (it has
+ * no way to check collection membership dynamically at checkout).
+ */
+async function resolveCollectionProductIds(
+  admin: AdminApiContext,
+  collectionIds: string[],
+): Promise<string[]> {
+  if (collectionIds.length === 0) return [];
+  const ids = new Set<string>();
+  for (const collectionId of collectionIds) {
+    let hasNextPage = true;
+    let cursor: string | null = null;
+    while (hasNextPage) {
+      const response = await admin.graphql(
+        `#graphql
+        query quantityBreakCollectionProducts($id: ID!, $cursor: String) {
+          collection(id: $id) {
+            products(first: 250, after: $cursor) {
+              edges { node { id } }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }`,
+        { variables: { id: collectionId, cursor } },
+      );
+      const json: {
+        data?: {
+          collection?: {
+            products?: {
+              edges: { node: { id: string } }[];
+              pageInfo: { hasNextPage: boolean; endCursor: string | null };
+            };
+          };
+        };
+      } = await response.json();
+      const products = json.data?.collection?.products;
+      for (const edge of products?.edges ?? []) ids.add(edge.node.id);
+      hasNextPage = products?.pageInfo?.hasNextPage ?? false;
+      cursor = products?.pageInfo?.endCursor ?? null;
+    }
+  }
+  return Array.from(ids);
 }
 
 /**
