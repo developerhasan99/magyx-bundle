@@ -95,6 +95,9 @@ function buildExpandOperation(line, componentsValue) {
           fixedPricePerUnit: { amount: "0.00" },
         },
       },
+      // Visible cart/checkout line item property so gift components are
+      // clearly called out to the customer instead of just showing $0.00.
+      attributes: [{ key: "Free Gift", value: "Yes" }],
     });
   }
 
