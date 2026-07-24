@@ -168,7 +168,7 @@ export default function Dashboard() {
       subtitle="Welcome to Magyx Bundle — bundle products together and watch your average order value grow."
       primaryAction={{
         content: "Create bundle",
-        url: "/app/bundles/new",
+        url: "/app/bundles/create",
       }}
     >
       <TitleBar title="Magyx Bundle" />
@@ -185,7 +185,7 @@ export default function Dashboard() {
               {total === 0 ? (
                 <EmptyState
                   heading="Create bundles to boost your average order value"
-                  action={{ content: "Create bundle", url: "/app/bundles/new" }}
+                  action={{ content: "Create bundle", url: "/app/bundles/create" }}
                   image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
                 >
                   <p>

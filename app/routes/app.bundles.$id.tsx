@@ -24,6 +24,7 @@ import {
 import { DeleteIcon, EditIcon, ImageIcon, PlusIcon } from "@shopify/polaris-icons";
 import { SaveBar, TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
+import { RadioIndicator } from "../components/BundleTypeCard";
 import {
   createBundle,
   deleteBundle,
@@ -36,9 +37,22 @@ import {
   syncBundleConfigMetafield,
 } from "../models/shopify-sync.server";
 
+const CREATABLE_BUNDLE_TYPES = ["FIXED", "SLOT_BUILDER", "MIX_MATCH"];
+
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
-  if (params.id === "new") return { bundle: null, shopifyProduct: null };
+  if (params.id === "new") {
+    // Set by the /app/bundles/create type picker so this editor opens with
+    // the chosen type pre-selected instead of always defaulting to FIXED.
+    const requestedType = new URL(request.url).searchParams.get("type");
+    return {
+      bundle: null,
+      shopifyProduct: null,
+      requestedType: CREATABLE_BUNDLE_TYPES.includes(requestedType ?? "")
+        ? (requestedType as "FIXED" | "SLOT_BUILDER" | "MIX_MATCH")
+        : null,
+    };
+  }
 
   const bundle = await getBundle(session.shop, params.id!);
   if (!bundle) throw new Response("Not found", { status: 404 });
@@ -154,6 +168,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   return {
     shopifyProduct,
+    requestedType: null,
     bundle: {
       id: bundle.id,
       title: bundle.title,
@@ -447,85 +462,6 @@ function PackageTab({
   );
 }
 
-const BUNDLE_TYPE_OPTIONS = [
-  {
-    value: "FIXED",
-    label: "Fixed bundle",
-    description: "A set combination sold as one product at a set price.",
-  },
-  {
-    value: "SLOT_BUILDER",
-    label: "Bundle builder",
-    description:
-      "A product with numbered slots — customers fill each slot from a pool of products.",
-  },
-  {
-    value: "MIX_MATCH",
-    label: "Mix & match",
-    description:
-      "Customers choose their own items from a list, with tiered discounts.",
-  },
-] as const;
-
-function BundleTypeCard({
-  label,
-  description,
-  selected,
-  disabled,
-  onSelect,
-}: {
-  label: string;
-  description: string;
-  selected: boolean;
-  disabled: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      disabled={disabled}
-      aria-pressed={selected}
-      style={{
-        // Buttons vertically center their content by default; pin it to the
-        // top so equal-height cards in the grid stay top-aligned
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "stretch",
-        justifyContent: "flex-start",
-        textAlign: "left",
-        color: "var(--p-color-text)",
-        padding: "var(--p-space-300)",
-        borderRadius: "var(--p-border-radius-300)",
-        border: selected
-          ? "2px solid var(--p-color-border-emphasis)"
-          : "1px solid var(--p-color-border)",
-        // 1px compensation keeps unselected cards the same size as the
-        // selected one despite the thinner border
-        margin: selected ? 0 : 1,
-        background: selected
-          ? "var(--p-color-bg-surface-selected)"
-          : "var(--p-color-bg-surface)",
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled && !selected ? 0.5 : 1,
-        transition: "border-color 100ms ease, background 100ms ease",
-      }}
-    >
-      <BlockStack gap="100">
-        <InlineStack gap="200" blockAlign="center" wrap={false}>
-          <RadioIndicator selected={selected} />
-          <Text as="span" variant="bodyMd" fontWeight="semibold">
-            {label}
-          </Text>
-        </InlineStack>
-        <Text as="span" variant="bodySm" tone="subdued">
-          {description}
-        </Text>
-      </BlockStack>
-    </button>
-  );
-}
-
 const WIDGET_STYLE_OPTIONS = [
   {
     value: "numbered",
@@ -721,36 +657,19 @@ function WidgetStyleCard({
   );
 }
 
-function RadioIndicator({ selected }: { selected: boolean }) {
-  return (
-    <span
-      style={{
-        width: 16,
-        height: 16,
-        flexShrink: 0,
-        borderRadius: "50%",
-        border: selected
-          ? "5px solid var(--p-color-border-emphasis)"
-          : "2px solid var(--p-color-border)",
-        background: "var(--p-color-bg-surface)",
-        transition: "border 100ms ease",
-      }}
-    />
-  );
-}
-
 type LoaderBundle = SerializeFrom<typeof loader>["bundle"];
 
 // Derives editor form state from the loaded bundle. Used for initial values,
 // for resetting on discard, and as the baseline for dirty-state detection —
 // keep field order stable, the dirty check compares JSON serializations.
-function formStateOf(bundle: LoaderBundle) {
+function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
+  const type = bundle?.type ?? requestedType ?? "FIXED";
   return {
     title: bundle?.title ?? "",
-    type: bundle?.type ?? "FIXED",
+    type,
     status: bundle?.status ?? "DRAFT",
     pricingType:
-      bundle?.pricingType ?? (bundle?.type === "MIX_MATCH" ? "PERCENT_OFF" : "FIXED_PRICE"),
+      bundle?.pricingType ?? (type === "MIX_MATCH" ? "PERCENT_OFF" : "FIXED_PRICE"),
     pricingValue: String(bundle?.pricingValue ?? ""),
     widgetStyle: bundle?.widgetStyle ?? "numbered",
     widgetHeading: bundle?.widgetHeading ?? "What's inside",
@@ -813,14 +732,17 @@ function formStateOf(bundle: LoaderBundle) {
 }
 
 export default function BundleBuilder() {
-  const { bundle, shopifyProduct } = useLoaderData<typeof loader>();
+  const { bundle, shopifyProduct, requestedType } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const deleteFetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
   const isNew = !bundle;
 
-  const initialForm = useMemo(() => formStateOf(bundle), [bundle]);
+  const initialForm = useMemo(
+    () => formStateOf(bundle, requestedType),
+    [bundle, requestedType],
+  );
 
   const [title, setTitle] = useState(initialForm.title);
   // No longer editable in the UI, but sent on save so existing values persist
@@ -1748,43 +1670,6 @@ export default function BundleBuilder() {
                     autoComplete="off"
                     placeholder="e.g. Summer Essentials Kit"
                   />
-                </BlockStack>
-              </Card>
-
-              <Card>
-                <BlockStack gap="400">
-                  <Text as="h2" variant="headingMd">
-                    Bundle type
-                  </Text>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                      gap: "var(--p-space-300)",
-                    }}
-                  >
-                    {BUNDLE_TYPE_OPTIONS.map((option) => (
-                      <BundleTypeCard
-                        key={option.value}
-                        label={option.label}
-                        description={option.description}
-                        selected={type === option.value}
-                        disabled={!isNew}
-                        onSelect={() => {
-                          setType(option.value);
-                          setPricingType(
-                            option.value === "FIXED" ? "FIXED_PRICE" : "PERCENT_OFF",
-                          );
-                        }}
-                      />
-                    ))}
-                  </div>
-                  {!isNew && (
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Bundle type can&apos;t be changed after the bundle is
-                      created.
-                    </Text>
-                  )}
                 </BlockStack>
               </Card>
 
