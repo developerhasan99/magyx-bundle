@@ -20,6 +20,25 @@ export interface BundleItemInput {
   position: number;
 }
 
+// FIXED bundles only: one alternate purchase option ("2 Pack", "3 Pack", ...)
+// under the bundle, each with its own items, gifts, pricing, and free
+// shipping — published as one variant on the bundle's Shopify product.
+export interface PackageInput {
+  // Present when editing an already-saved package; absent for one added in
+  // this edit session. Used to update the existing row in place (preserving
+  // its `shopifyVariantId`) instead of deleting/recreating it, so a save
+  // never orphans an already-published Shopify variant.
+  id?: string;
+  label: string;
+  badgeText?: string | null;
+  badgeTone?: string | null;
+  position: number;
+  pricingType: PricingType;
+  pricingValue: number;
+  freeShipping: boolean;
+  items: BundleItemInput[];
+}
+
 export interface BundleInput {
   title: string;
   description?: string;
@@ -37,6 +56,8 @@ export interface BundleInput {
   // FIXED bundles: waives shipping at checkout when this bundle is bought
   freeShipping: boolean;
   items: BundleItemInput[];
+  // FIXED bundles only; empty for MIX_MATCH/SLOT_BUILDER
+  packages: PackageInput[];
   rule?: {
     minItems: number;
     maxItems?: number | null;
@@ -45,10 +66,17 @@ export interface BundleInput {
   } | null;
 }
 
+const PACKAGES_INCLUDE = {
+  packages: {
+    include: { items: { orderBy: { position: "asc" as const } } },
+    orderBy: { position: "asc" as const },
+  },
+};
+
 export function getBundles(shop: string) {
   return prisma.bundle.findMany({
     where: { shop },
-    include: { items: { orderBy: { position: "asc" } }, rule: true },
+    include: { items: { orderBy: { position: "asc" } }, rule: true, ...PACKAGES_INCLUDE },
     orderBy: { updatedAt: "desc" },
   });
 }
@@ -56,8 +84,21 @@ export function getBundles(shop: string) {
 export function getBundle(shop: string, id: string) {
   return prisma.bundle.findFirst({
     where: { id, shop },
-    include: { items: { orderBy: { position: "asc" } }, rule: true },
+    include: { items: { orderBy: { position: "asc" } }, rule: true, ...PACKAGES_INCLUDE },
   });
+}
+
+function packagesCreateData(packages: PackageInput[]) {
+  return packages.map((pkg) => ({
+    label: pkg.label,
+    badgeText: pkg.badgeText,
+    badgeTone: pkg.badgeTone,
+    position: pkg.position,
+    pricingType: pkg.pricingType,
+    pricingValue: pkg.pricingValue,
+    freeShipping: pkg.freeShipping,
+    items: { create: pkg.items },
+  }));
 }
 
 export async function createBundle(shop: string, input: BundleInput) {
@@ -78,6 +119,7 @@ export async function createBundle(shop: string, input: BundleInput) {
       showSubtextOnGifts: input.showSubtextOnGifts,
       freeShipping: input.freeShipping,
       items: { create: input.items },
+      packages: { create: packagesCreateData(input.packages) },
       rule: input.rule
         ? {
             create: {
@@ -89,7 +131,7 @@ export async function createBundle(shop: string, input: BundleInput) {
           }
         : undefined,
     },
-    include: { items: true, rule: true },
+    include: { items: true, rule: true, ...PACKAGES_INCLUDE },
   });
 }
 
@@ -100,6 +142,48 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
   return prisma.$transaction(async (tx) => {
     await tx.bundleItem.deleteMany({ where: { bundleId: id } });
     await tx.bundleRule.deleteMany({ where: { bundleId: id } });
+
+    // Packages are upserted by id, not deleted/recreated like items/rule —
+    // an existing package's `shopifyVariantId` must survive edits so the
+    // publish step can keep updating the same Shopify variant instead of
+    // creating a new one and orphaning the old.
+    const existingPackages = await tx.bundlePackage.findMany({
+      where: { bundleId: id },
+      select: { id: true },
+    });
+    const existingPackageIds = new Set(existingPackages.map((p) => p.id));
+    const incomingPackageIds = new Set(
+      input.packages.map((p) => p.id).filter((v): v is string => Boolean(v)),
+    );
+    const removedPackageIds = existingPackages
+      .map((p) => p.id)
+      .filter((pid) => !incomingPackageIds.has(pid));
+    if (removedPackageIds.length > 0) {
+      await tx.bundlePackage.deleteMany({ where: { id: { in: removedPackageIds } } });
+    }
+    for (const pkg of input.packages) {
+      const packageData = {
+        label: pkg.label,
+        badgeText: pkg.badgeText,
+        badgeTone: pkg.badgeTone,
+        position: pkg.position,
+        pricingType: pkg.pricingType,
+        pricingValue: pkg.pricingValue,
+        freeShipping: pkg.freeShipping,
+      };
+      if (pkg.id && existingPackageIds.has(pkg.id)) {
+        await tx.bundlePackageItem.deleteMany({ where: { packageId: pkg.id } });
+        await tx.bundlePackage.update({
+          where: { id: pkg.id },
+          data: { ...packageData, items: { create: pkg.items } },
+        });
+      } else {
+        await tx.bundlePackage.create({
+          data: { ...packageData, bundleId: id, items: { create: pkg.items } },
+        });
+      }
+    }
+
     return tx.bundle.update({
       where: { id },
       data: {
@@ -128,7 +212,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
             }
           : undefined,
       },
-      include: { items: true, rule: true },
+      include: { items: true, rule: true, ...PACKAGES_INCLUDE },
     });
   });
 }
@@ -147,4 +231,11 @@ export async function setBundleStatus(shop: string, id: string, status: BundleSt
 
 export async function setBundleProduct(id: string, shopifyProductId: string) {
   return prisma.bundle.update({ where: { id }, data: { shopifyProductId } });
+}
+
+export async function setPackageVariant(packageId: string, shopifyVariantId: string) {
+  return prisma.bundlePackage.update({
+    where: { id: packageId },
+    data: { shopifyVariantId },
+  });
 }

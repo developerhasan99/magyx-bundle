@@ -246,6 +246,72 @@
   background: #f1efec;
 }
 
+/* ---------- Package tabs (bundles with more than one package) ---------- */
+.magyx-bundle-contents__packs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.magyx-bundle-contents__pack-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid var(--bc-border);
+  border-radius: 999px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.magyx-bundle-contents__pack-tab:hover {
+  border-color: var(--bc-accent);
+}
+
+.magyx-bundle-contents__pack-tab--active {
+  border-color: var(--bc-accent);
+  background: var(--bc-accent);
+  color: #fff;
+}
+
+.magyx-bundle-contents__pack-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+}
+
+.magyx-bundle-contents__pack-tab--active .magyx-bundle-contents__pack-badge {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.magyx-bundle-contents__pack-badge--success { background: #d4f4dd; color: #0f5c2e; }
+.magyx-bundle-contents__pack-badge--info { background: #d7ebfc; color: #0a4a7a; }
+.magyx-bundle-contents__pack-badge--attention { background: #ffe9c2; color: #7a4a00; }
+.magyx-bundle-contents__pack-badge--warning { background: #fff1c2; color: #6b5200; }
+.magyx-bundle-contents__pack-badge--critical { background: #fbdada; color: #7a1010; }
+.magyx-bundle-contents__pack-badge--new { background: #e6dcfb; color: #4a2a8a; }
+
+.magyx-bundle-contents__pack-tab--active .magyx-bundle-contents__pack-badge--success,
+.magyx-bundle-contents__pack-tab--active .magyx-bundle-contents__pack-badge--info,
+.magyx-bundle-contents__pack-tab--active .magyx-bundle-contents__pack-badge--attention,
+.magyx-bundle-contents__pack-tab--active .magyx-bundle-contents__pack-badge--warning,
+.magyx-bundle-contents__pack-tab--active .magyx-bundle-contents__pack-badge--critical,
+.magyx-bundle-contents__pack-tab--active .magyx-bundle-contents__pack-badge--new {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
 .magyx-bundle-contents__gift-badge {
   display: inline-block;
   margin: 4px 0 0;

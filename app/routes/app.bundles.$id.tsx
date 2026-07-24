@@ -86,9 +86,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // Distinguishes "lookup failed" from "variant deleted": only flag items as
   // missing when the query itself succeeded
   let pricesLoaded = false;
-  const itemVariantIds = bundle.items
-    .map((i) => i.variantId)
-    .filter((id): id is string => Boolean(id));
+  const itemVariantIds = Array.from(
+    new Set([
+      ...bundle.items.map((i) => i.variantId).filter((id): id is string => Boolean(id)),
+      ...bundle.packages.flatMap((p) =>
+        p.items.map((i) => i.variantId).filter((id): id is string => Boolean(id)),
+      ),
+    ]),
+  );
   if (itemVariantIds.length > 0) {
     try {
       const response = await admin.graphql(
@@ -176,6 +181,27 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         missing:
           pricesLoaded && Boolean(i.variantId) && !priceByVariant.has(i.variantId!),
       })),
+      packages: bundle.packages.map((p) => ({
+        id: p.id,
+        label: p.label,
+        badgeText: p.badgeText,
+        badgeTone: p.badgeTone,
+        pricingType: p.pricingType,
+        pricingValue: p.pricingValue,
+        freeShipping: p.freeShipping,
+        shopifyVariantId: p.shopifyVariantId,
+        items: p.items.map((i) => ({
+          productId: i.productId,
+          variantId: i.variantId,
+          productTitle: i.productTitle,
+          productImageUrl: i.productImageUrl,
+          quantity: i.quantity,
+          isGift: i.isGift,
+          price: i.variantId ? (priceByVariant.get(i.variantId) ?? null) : null,
+          missing:
+            pricesLoaded && Boolean(i.variantId) && !priceByVariant.has(i.variantId!),
+        })),
+      })),
       collections,
       rule: bundle.rule
         ? {
@@ -211,13 +237,24 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const hasPool =
     payload.items.length > 0 || (payload.rule?.collectionIds?.length ?? 0) > 0;
   if (!payload.title?.trim()) errors.push("Title is required.");
-  if (payload.type === "FIXED" && payload.items.filter((i) => !i.isGift).length < 2)
-    errors.push("Fixed bundles need at least two products.");
-  if (payload.type !== "FIXED" && !hasPool)
-    errors.push("Add products or select at least one collection for customers to pick from.");
-  if (payload.pricingValue < 0) errors.push("Pricing value can't be negative.");
-  if (payload.pricingType === "PERCENT_OFF" && payload.pricingValue > 100)
-    errors.push("Discount can't be more than 100%.");
+  if (payload.type === "FIXED") {
+    if (payload.packages.length === 0) errors.push("Add at least one package.");
+    payload.packages.forEach((pkg, i) => {
+      const label = pkg.label?.trim() || `Package ${i + 1}`;
+      if (!pkg.label?.trim()) errors.push(`Package ${i + 1} needs a title.`);
+      if (pkg.items.filter((item) => !item.isGift).length < 2)
+        errors.push(`"${label}" needs at least two products.`);
+      if (pkg.pricingValue < 0) errors.push(`"${label}" pricing value can't be negative.`);
+      if (pkg.pricingType === "PERCENT_OFF" && pkg.pricingValue > 100)
+        errors.push(`"${label}" discount can't be more than 100%.`);
+    });
+  } else {
+    if (!hasPool)
+      errors.push("Add products or select at least one collection for customers to pick from.");
+    if (payload.pricingValue < 0) errors.push("Pricing value can't be negative.");
+    if (payload.pricingType === "PERCENT_OFF" && payload.pricingValue > 100)
+      errors.push("Discount can't be more than 100%.");
+  }
   if (payload.type === "MIX_MATCH" && (payload.rule?.discountTiers?.length ?? 0) === 0)
     errors.push("Add at least one discount tier.");
   if (payload.rule?.discountTiers?.some((t) => t.discount > 100))
@@ -229,6 +266,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const input: BundleInput = {
     ...payload,
     items: payload.items.map((item, position) => ({ ...item, position })),
+    packages: payload.packages.map((pkg, position) => ({
+      ...pkg,
+      position,
+      items: pkg.items.map((item, itemPosition) => ({ ...item, position: itemPosition })),
+    })),
     rule: payload.type === "FIXED" ? null : payload.rule,
   };
 
@@ -239,9 +281,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   // Publishing a fixed bundle creates/updates its parent product in Shopify
   if (bundle.type === "FIXED" && bundle.status === "ACTIVE") {
-    const componentVariantIds = bundle.items
-      .filter((i) => i.variantId)
-      .map((i) => ({ variantId: i.variantId!, quantity: i.quantity, isGift: i.isGift }));
     try {
       await publishFixedBundleProduct(
         admin,
@@ -249,17 +288,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           bundleId: bundle.id,
           title: bundle.title,
           description: bundle.description,
-          pricingType: bundle.pricingType,
-          pricingValue: bundle.pricingValue,
-          componentVariantIds,
-          displayItems: bundle.items.map((i) => ({
-            title: i.productTitle,
-            imageUrl: i.productImageUrl,
-            quantity: i.quantity,
-            productId: i.productId,
-            variantId: i.variantId,
-            isGift: i.isGift,
-          })),
           widgetSettings: {
             style: bundle.widgetStyle,
             heading: bundle.widgetHeading,
@@ -267,8 +295,28 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             showPrices: bundle.showPrices,
             itemSubtextTemplate: bundle.itemSubtextTemplate,
             showSubtextOnGifts: bundle.showSubtextOnGifts,
-            freeShipping: bundle.freeShipping,
           },
+          packages: bundle.packages.map((pkg) => ({
+            packageId: pkg.id,
+            existingVariantId: pkg.shopifyVariantId,
+            label: pkg.label,
+            badgeText: pkg.badgeText,
+            badgeTone: pkg.badgeTone,
+            pricingType: pkg.pricingType,
+            pricingValue: pkg.pricingValue,
+            freeShipping: pkg.freeShipping,
+            componentVariantIds: pkg.items
+              .filter((i) => i.variantId)
+              .map((i) => ({ variantId: i.variantId!, quantity: i.quantity, isGift: i.isGift })),
+            displayItems: pkg.items.map((i) => ({
+              title: i.productTitle,
+              imageUrl: i.productImageUrl,
+              quantity: i.quantity,
+              productId: i.productId,
+              variantId: i.variantId,
+              isGift: i.isGift,
+            })),
+          })),
         },
         bundle.shopifyProductId,
       );
@@ -311,6 +359,92 @@ interface CollectionState {
 interface TierState {
   quantity: string;
   discount: string;
+}
+
+// FIXED bundles only: one alternate purchase option ("2 Pack", "3 Pack", ...)
+interface PackageState {
+  // Prisma id once saved; absent for a package added in this editing session
+  id?: string;
+  // Stable React key regardless of save state
+  tempKey: string;
+  label: string;
+  badgeText: string;
+  badgeTone: string; // "" = no badge
+  pricingType: string;
+  pricingValue: string;
+  freeShipping: boolean;
+  items: ItemState[];
+}
+
+function defaultPackageState(): PackageState {
+  return {
+    tempKey: "default",
+    label: "Default",
+    badgeText: "",
+    badgeTone: "",
+    pricingType: "FIXED_PRICE",
+    pricingValue: "",
+    freeShipping: false,
+    items: [],
+  };
+}
+
+const BADGE_TONE_OPTIONS = [
+  { label: "No badge", value: "" },
+  { label: "Info", value: "info" },
+  { label: "Success", value: "success" },
+  { label: "Attention", value: "attention" },
+  { label: "Warning", value: "warning" },
+  { label: "Critical", value: "critical" },
+  { label: "New", value: "new" },
+];
+
+function PackageTab({
+  label,
+  badgeText,
+  badgeTone,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  badgeText: string;
+  badgeTone: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--p-space-150)",
+        padding: "var(--p-space-150) var(--p-space-300)",
+        borderRadius: "var(--p-border-radius-full)",
+        border: selected
+          ? "2px solid var(--p-color-border-emphasis)"
+          : "1px solid var(--p-color-border)",
+        margin: selected ? 0 : 1,
+        background: selected
+          ? "var(--p-color-bg-surface-selected)"
+          : "var(--p-color-bg-surface)",
+        cursor: "pointer",
+        color: "var(--p-color-text)",
+        transition: "border-color 100ms ease, background 100ms ease",
+      }}
+    >
+      <Text as="span" variant="bodySm" fontWeight={selected ? "semibold" : "regular"}>
+        {label || "Untitled package"}
+      </Text>
+      {badgeText && (
+        <Badge tone={(badgeTone || undefined) as "info" | "success" | "attention" | "warning" | "critical" | "new" | undefined} size="small">
+          {badgeText}
+        </Badge>
+      )}
+    </button>
+  );
 }
 
 const BUNDLE_TYPE_OPTIONS = [
@@ -636,6 +770,33 @@ function formStateOf(bundle: LoaderBundle) {
         price: i.price ?? null,
         missing: i.missing ?? false,
       })) ?? [],
+    packages:
+      bundle?.packages && bundle.packages.length > 0
+        ? bundle.packages.map(
+            (p): PackageState => ({
+              id: p.id,
+              tempKey: p.id,
+              label: p.label,
+              badgeText: p.badgeText ?? "",
+              badgeTone: p.badgeTone ?? "",
+              pricingType: p.pricingType,
+              pricingValue: String(p.pricingValue),
+              freeShipping: p.freeShipping,
+              items: p.items.map(
+                (i): ItemState => ({
+                  productId: i.productId,
+                  variantId: i.variantId ?? null,
+                  productTitle: i.productTitle,
+                  productImageUrl: i.productImageUrl ?? null,
+                  quantity: i.quantity,
+                  isGift: i.isGift ?? false,
+                  price: i.price ?? null,
+                  missing: i.missing ?? false,
+                }),
+              ),
+            }),
+          )
+        : [defaultPackageState()],
     collections: (bundle?.collections ?? []) as CollectionState[],
     poolSource: (bundle?.collections?.length ?? 0) > 0 ? "COLLECTIONS" : "PRODUCTS",
     slotCount: String((bundle?.type === "SLOT_BUILDER" && bundle?.rule?.minItems) || 3),
@@ -680,6 +841,8 @@ export default function BundleBuilder() {
   );
   const [freeShipping, setFreeShipping] = useState(initialForm.freeShipping);
   const [items, setItems] = useState<ItemState[]>(initialForm.items);
+  const [packages, setPackages] = useState<PackageState[]>(initialForm.packages);
+  const [activePackageIndex, setActivePackageIndex] = useState(0);
   const [collections, setCollections] = useState<CollectionState[]>(
     initialForm.collections,
   );
@@ -689,10 +852,68 @@ export default function BundleBuilder() {
   const [maxItems, setMaxItems] = useState(initialForm.maxItems);
   const [tiers, setTiers] = useState<TierState[]>(initialForm.tiers);
 
-  // Gifts only apply to FIXED bundles; paidItems/giftItems split the single
-  // items array for rendering and price math without mutating storage shape
-  const paidItems = useMemo(() => items.filter((i) => !i.isGift), [items]);
-  const giftItems = useMemo(() => items.filter((i) => i.isGift), [items]);
+  // Keep the active tab in range when a package is added (select it) or
+  // removed (fall back to the last remaining one)
+  const prevPackagesLengthRef = useRef(packages.length);
+  useEffect(() => {
+    if (packages.length > prevPackagesLengthRef.current) {
+      setActivePackageIndex(packages.length - 1);
+    } else if (activePackageIndex >= packages.length) {
+      setActivePackageIndex(Math.max(0, packages.length - 1));
+    }
+    prevPackagesLengthRef.current = packages.length;
+  }, [packages.length, activePackageIndex]);
+
+  // FIXED bundles source their item list/pricing from the active package;
+  // every other type keeps using the flat top-level state exactly as before
+  const activeItems = useMemo(
+    () => (type === "FIXED" ? (packages[activePackageIndex]?.items ?? []) : items),
+    [type, packages, activePackageIndex, items],
+  );
+  const activePricingType =
+    type === "FIXED" ? (packages[activePackageIndex]?.pricingType ?? "FIXED_PRICE") : pricingType;
+  const activePricingValue =
+    type === "FIXED" ? (packages[activePackageIndex]?.pricingValue ?? "") : pricingValue;
+
+  const setActiveItems = useCallback(
+    (updater: (current: ItemState[]) => ItemState[]) => {
+      if (type === "FIXED") {
+        setPackages((current) =>
+          current.map((pkg, i) =>
+            i === activePackageIndex ? { ...pkg, items: updater(pkg.items) } : pkg,
+          ),
+        );
+      } else {
+        setItems(updater);
+      }
+    },
+    [type, activePackageIndex],
+  );
+
+  const updateActivePackage = useCallback(
+    (patch: Partial<PackageState>) => {
+      setPackages((current) =>
+        current.map((pkg, i) => (i === activePackageIndex ? { ...pkg, ...patch } : pkg)),
+      );
+    },
+    [activePackageIndex],
+  );
+
+  const addPackage = useCallback(() => {
+    setPackages((current) => [
+      ...current,
+      { ...defaultPackageState(), tempKey: `new-${Date.now()}`, label: `Pack ${current.length + 1}` },
+    ]);
+  }, []);
+
+  const removeActivePackage = useCallback(() => {
+    setPackages((current) => current.filter((_, i) => i !== activePackageIndex));
+  }, [activePackageIndex]);
+
+  // Gifts only apply to FIXED bundles; paidItems/giftItems split the active
+  // items list for rendering and price math without mutating storage shape
+  const paidItems = useMemo(() => activeItems.filter((i) => !i.isGift), [activeItems]);
+  const giftItems = useMemo(() => activeItems.filter((i) => i.isGift), [activeItems]);
 
   const isSaving = fetcher.state !== "idle";
 
@@ -701,13 +922,13 @@ export default function BundleBuilder() {
       JSON.stringify({
         title, type, status, pricingType, pricingValue, widgetStyle,
         widgetHeading, accentColor, showPrices, itemSubtextTemplate,
-        showSubtextOnGifts, freeShipping, items, collections, poolSource, slotCount,
+        showSubtextOnGifts, freeShipping, items, packages, collections, poolSource, slotCount,
         minItems, maxItems, tiers,
       }) !== JSON.stringify(initialForm),
     [
       initialForm, title, type, status, pricingType, pricingValue,
       widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
-      showSubtextOnGifts, freeShipping, items, collections, poolSource, slotCount,
+      showSubtextOnGifts, freeShipping, items, packages, collections, poolSource, slotCount,
       minItems, maxItems, tiers,
     ],
   );
@@ -726,6 +947,8 @@ export default function BundleBuilder() {
     setShowSubtextOnGifts(initialForm.showSubtextOnGifts);
     setFreeShipping(initialForm.freeShipping);
     setItems(initialForm.items);
+    setPackages(initialForm.packages);
+    setActivePackageIndex(0);
     setCollections(initialForm.collections);
     setPoolSource(initialForm.poolSource);
     setSlotCount(initialForm.slotCount);
@@ -755,7 +978,7 @@ export default function BundleBuilder() {
     // line item. Pool types stay product-level. Scoped to the matching
     // group (paid vs. gift) so picking gifts doesn't preselect/overwrite
     // the paid component list, and vice versa.
-    const groupItems = items.filter((i) => i.isGift === isGiftFlag);
+    const groupItems = activeItems.filter((i) => i.isGift === isGiftFlag);
     const selectionIds =
       type === "FIXED"
         ? Array.from(
@@ -791,7 +1014,7 @@ export default function BundleBuilder() {
     };
 
     if (type === "FIXED") {
-      setItems((current) => {
+      setActiveItems((current) => {
         // Scoped to the same group so an existing paid item isn't reused
         // (with the wrong isGift flag) when adding to the gift group, or
         // vice versa.
@@ -847,7 +1070,7 @@ export default function BundleBuilder() {
           },
       );
     });
-  }, [shopify, items, type]);
+  }, [shopify, activeItems, type, setActiveItems]);
 
   const openCollectionPicker = useCallback(async () => {
     const selection = await shopify.resourcePicker({
@@ -909,9 +1132,24 @@ export default function BundleBuilder() {
       showSubtextOnGifts,
       freeShipping,
       // price/missing are editor-only display state — the DB schema doesn't store them
-      items: usesCollections
-        ? []
-        : items.map(({ price: _price, missing: _missing, ...item }) => item),
+      items:
+        type === "FIXED" || usesCollections
+          ? []
+          : items.map(({ price: _price, missing: _missing, ...item }) => item),
+      packages:
+        type === "FIXED"
+          ? packages.map((pkg, position) => ({
+              id: pkg.id,
+              label: pkg.label,
+              badgeText: pkg.badgeText.trim() || null,
+              badgeTone: pkg.badgeTone || null,
+              position,
+              pricingType: pkg.pricingType,
+              pricingValue: parseFloat(pkg.pricingValue) || 0,
+              freeShipping: pkg.freeShipping,
+              items: pkg.items.map(({ price: _price, missing: _missing, ...item }) => item),
+            }))
+          : [],
       rule:
         type === "MIX_MATCH"
           ? {
@@ -942,7 +1180,7 @@ export default function BundleBuilder() {
   }, [
     fetcher, title, description, type, status, pricingType, pricingValue,
     widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
-    showSubtextOnGifts, freeShipping, items, minItems, maxItems, tiers, poolSource,
+    showSubtextOnGifts, freeShipping, items, packages, minItems, maxItems, tiers, poolSource,
     collections, slotCount,
   ]);
 
@@ -955,39 +1193,481 @@ export default function BundleBuilder() {
       ) / 100,
     [paidItems],
   );
-  const hasMissingPrices = items.some((i) => i.price == null);
+  const hasMissingPrices = activeItems.some((i) => i.price == null);
   const computedBundlePrice = useMemo(() => {
-    const value = parseFloat(pricingValue) || 0;
+    const value = parseFloat(activePricingValue) || 0;
     let price: number;
-    if (pricingType === "FIXED_PRICE") price = value;
-    else if (pricingType === "PERCENT_OFF") price = combinedPrice * (1 - value / 100);
+    if (activePricingType === "FIXED_PRICE") price = value;
+    else if (activePricingType === "PERCENT_OFF") price = combinedPrice * (1 - value / 100);
     else price = combinedPrice - value;
     return Math.max(0, Math.round(price * 100) / 100);
-  }, [pricingType, pricingValue, combinedPrice]);
+  }, [activePricingType, activePricingValue, combinedPrice]);
   const pricingValueError =
-    pricingType === "PERCENT_OFF" && (parseFloat(pricingValue) || 0) > 100
+    activePricingType === "PERCENT_OFF" && (parseFloat(activePricingValue) || 0) > 100
       ? "Discount can't be more than 100%."
-      : (parseFloat(pricingValue) || 0) < 0
+      : (parseFloat(activePricingValue) || 0) < 0
         ? "Value can't be negative."
         : undefined;
   const savings = Math.round((combinedPrice - computedBundlePrice) * 100) / 100;
 
   const previewSummary = useMemo(() => {
     if (type !== "MIX_MATCH") {
-      if (pricingType === "FIXED_PRICE")
-        return pricingValue ? `Bundle price: $${pricingValue}` : "Set a bundle price";
-      if (pricingType === "PERCENT_OFF")
-        return pricingValue ? `${pricingValue}% off combined price` : "Set a discount";
-      return pricingValue ? `$${pricingValue} off combined price` : "Set a discount";
+      if (activePricingType === "FIXED_PRICE")
+        return activePricingValue ? `Bundle price: $${activePricingValue}` : "Set a bundle price";
+      if (activePricingType === "PERCENT_OFF")
+        return activePricingValue ? `${activePricingValue}% off combined price` : "Set a discount";
+      return activePricingValue ? `$${activePricingValue} off combined price` : "Set a discount";
     }
     const valid = tiers.filter((t) => t.quantity && t.discount);
     if (valid.length === 0) return "Add discount tiers";
     return valid
       .map((t) => `Buy ${t.quantity}+ → ${t.discount}% off`)
       .join(" · ");
-  }, [type, pricingType, pricingValue, tiers]);
+  }, [type, activePricingType, activePricingValue, tiers]);
 
   const showCollectionPool = type !== "FIXED" && poolSource === "COLLECTIONS";
+
+  // Extracted so FIXED bundles can render these inside the single "Packages"
+  // card while MIX_MATCH/SLOT_BUILDER keep them as their own separate cards.
+  const productsSection = (
+    <BlockStack gap="400">
+      <InlineStack align="space-between" blockAlign="center">
+        <Text as="h2" variant="headingMd">
+          {type === "FIXED" ? "Products in bundle" : "Product pool"}
+        </Text>
+        {showCollectionPool ? (
+          <Button icon={PlusIcon} onClick={openCollectionPicker}>
+            Add collections
+          </Button>
+        ) : (
+          <Button icon={PlusIcon} onClick={() => openResourcePicker(false)}>
+            Add products
+          </Button>
+        )}
+      </InlineStack>
+      {type !== "FIXED" && (
+        <ChoiceList
+          title="Customers pick from"
+          choices={[
+            {
+              label: "Specific products",
+              value: "PRODUCTS",
+              helpText: "Hand-pick the products shown in the selection panel.",
+            },
+            {
+              label: "Collections",
+              value: "COLLECTIONS",
+              helpText:
+                "Show every product from the chosen collections — stays up to date automatically.",
+            },
+          ]}
+          selected={[poolSource]}
+          onChange={(value) => setPoolSource(value[0])}
+        />
+      )}
+      {showCollectionPool ? (
+        collections.length === 0 ? (
+          <Box padding="400">
+            <Text as="p" tone="subdued" alignment="center">
+              Select the collections customers can pick products from.
+            </Text>
+          </Box>
+        ) : (
+          <BlockStack gap="300">
+            {collections.map((collection, index) => (
+              <Box key={collection.id}>
+                {index > 0 && <Box paddingBlockEnd="300"><Divider /></Box>}
+                <InlineStack
+                  gap="300"
+                  blockAlign="center"
+                  align="space-between"
+                  wrap={false}
+                >
+                  <InlineStack gap="300" blockAlign="center" wrap={false}>
+                    <Thumbnail
+                      source={collection.imageUrl || ImageIcon}
+                      alt={collection.title}
+                      size="small"
+                    />
+                    <Text as="span" variant="bodyMd" fontWeight="medium">
+                      {collection.title}
+                    </Text>
+                  </InlineStack>
+                  <Button
+                    icon={DeleteIcon}
+                    variant="tertiary"
+                    tone="critical"
+                    accessibilityLabel={`Remove ${collection.title}`}
+                    onClick={() =>
+                      setCollections((current) =>
+                        current.filter((_, i) => i !== index),
+                      )
+                    }
+                  />
+                </InlineStack>
+              </Box>
+            ))}
+          </BlockStack>
+        )
+      ) : paidItems.length === 0 ? (
+        <Box padding="400">
+          <Text as="p" tone="subdued" alignment="center">
+            {type === "FIXED"
+              ? "Add the products this bundle contains."
+              : "Add the products customers can pick from."}
+          </Text>
+        </Box>
+      ) : (
+        <BlockStack gap="300">
+          {paidItems.map((item, index) => (
+            <Box key={item.variantId ?? item.productId}>
+              {index > 0 && <Box paddingBlockEnd="300"><Divider /></Box>}
+              <InlineStack
+                gap="300"
+                blockAlign="center"
+                align="space-between"
+                wrap={false}
+              >
+                <InlineStack gap="300" blockAlign="center" wrap={false}>
+                  <Thumbnail
+                    source={item.productImageUrl || ImageIcon}
+                    alt={item.productTitle}
+                    size="small"
+                  />
+                  <BlockStack gap="050">
+                    <InlineStack gap="200" blockAlign="center">
+                      <Text as="span" variant="bodyMd" fontWeight="medium">
+                        {item.productTitle}
+                      </Text>
+                      {item.missing && (
+                        <Badge tone="critical">Deleted from store</Badge>
+                      )}
+                    </InlineStack>
+                    {item.price != null && (
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        ${item.price.toFixed(2)}
+                        {type === "FIXED" && item.quantity > 1
+                          ? ` × ${item.quantity} = $${(item.price * item.quantity).toFixed(2)}`
+                          : ""}
+                      </Text>
+                    )}
+                  </BlockStack>
+                </InlineStack>
+                <InlineStack gap="200" blockAlign="center" wrap={false}>
+                  {type === "FIXED" && (
+                    <div style={{ width: 90 }}>
+                      <TextField
+                        label="Qty"
+                        labelHidden
+                        type="number"
+                        min={1}
+                        value={String(item.quantity)}
+                        onChange={(value) =>
+                          setActiveItems((current) =>
+                            current.map((c) =>
+                              (c.variantId ?? c.productId) ===
+                              (item.variantId ?? item.productId)
+                                ? { ...c, quantity: Math.max(1, parseInt(value, 10) || 1) }
+                                : c,
+                            ),
+                          )
+                        }
+                        autoComplete="off"
+                        prefix="×"
+                      />
+                    </div>
+                  )}
+                  <Button
+                    icon={DeleteIcon}
+                    variant="tertiary"
+                    tone="critical"
+                    accessibilityLabel={`Remove ${item.productTitle}`}
+                    onClick={() =>
+                      setActiveItems((current) =>
+                        current.filter(
+                          (c) =>
+                            (c.variantId ?? c.productId) !==
+                            (item.variantId ?? item.productId),
+                        ),
+                      )
+                    }
+                  />
+                </InlineStack>
+              </InlineStack>
+            </Box>
+          ))}
+        </BlockStack>
+      )}
+    </BlockStack>
+  );
+
+  const giftsSection = (
+    <BlockStack gap="400">
+      <InlineStack align="space-between" blockAlign="center">
+        <Text as="h2" variant="headingMd">
+          Free gifts
+        </Text>
+        <Button icon={PlusIcon} onClick={() => openResourcePicker(true)}>
+          Add free gift
+        </Button>
+      </InlineStack>
+      <Text as="p" variant="bodySm" tone="subdued">
+        Optional. These products are always included at $0
+        alongside the bundle — they don&apos;t affect its price.
+      </Text>
+      <Checkbox
+        label="Include free shipping as a gift"
+        checked={packages[activePackageIndex]?.freeShipping ?? false}
+        onChange={(checked) => updateActivePackage({ freeShipping: checked })}
+        helpText="Waives shipping at checkout when a customer buys this bundle."
+      />
+      {giftItems.length === 0 ? (
+        <Box padding="400">
+          <Text as="p" tone="subdued" alignment="center">
+            No free gifts added.
+          </Text>
+        </Box>
+      ) : (
+        <BlockStack gap="300">
+          {giftItems.map((item, index) => (
+            <Box key={item.variantId ?? item.productId}>
+              {index > 0 && <Box paddingBlockEnd="300"><Divider /></Box>}
+              <InlineStack
+                gap="300"
+                blockAlign="center"
+                align="space-between"
+                wrap={false}
+              >
+                <InlineStack gap="300" blockAlign="center" wrap={false}>
+                  <Thumbnail
+                    source={item.productImageUrl || ImageIcon}
+                    alt={item.productTitle}
+                    size="small"
+                  />
+                  <BlockStack gap="050" inlineAlign="start">
+                    <InlineStack gap="200" blockAlign="center">
+                      <Text as="span" variant="bodyMd" fontWeight="medium">
+                        {item.productTitle}
+                      </Text>
+                      {item.missing && (
+                        <Badge tone="critical">Deleted from store</Badge>
+                      )}
+                    </InlineStack>
+                    <Badge tone="success">Free gift</Badge>
+                  </BlockStack>
+                </InlineStack>
+                <InlineStack gap="200" blockAlign="center" wrap={false}>
+                  <div style={{ width: 90 }}>
+                    <TextField
+                      label="Qty"
+                      labelHidden
+                      type="number"
+                      min={1}
+                      value={String(item.quantity)}
+                      onChange={(value) =>
+                        setActiveItems((current) =>
+                          current.map((c) =>
+                            (c.variantId ?? c.productId) ===
+                            (item.variantId ?? item.productId)
+                              ? { ...c, quantity: Math.max(1, parseInt(value, 10) || 1) }
+                              : c,
+                          ),
+                        )
+                      }
+                      autoComplete="off"
+                      prefix="×"
+                    />
+                  </div>
+                  <Button
+                    icon={DeleteIcon}
+                    variant="tertiary"
+                    tone="critical"
+                    accessibilityLabel={`Remove ${item.productTitle}`}
+                    onClick={() =>
+                      setActiveItems((current) =>
+                        current.filter(
+                          (c) =>
+                            (c.variantId ?? c.productId) !==
+                            (item.variantId ?? item.productId),
+                        ),
+                      )
+                    }
+                  />
+                </InlineStack>
+              </InlineStack>
+            </Box>
+          ))}
+        </BlockStack>
+      )}
+    </BlockStack>
+  );
+
+  const pricingSection = (
+    <BlockStack gap="400">
+      <Text as="h2" variant="headingMd">
+        Pricing
+      </Text>
+      <ChoiceList
+        title="Pricing"
+        titleHidden
+        choices={[
+          { label: "Fixed bundle price", value: "FIXED_PRICE" },
+          { label: "Percentage off combined price", value: "PERCENT_OFF" },
+          { label: "Amount off combined price", value: "AMOUNT_OFF" },
+        ]}
+        selected={[activePricingType]}
+        onChange={(value) =>
+          type === "FIXED"
+            ? updateActivePackage({ pricingType: value[0] })
+            : setPricingType(value[0])
+        }
+      />
+      <div style={{ maxWidth: 200 }}>
+        <TextField
+          label={
+            activePricingType === "FIXED_PRICE"
+              ? "Bundle price"
+              : activePricingType === "PERCENT_OFF"
+                ? "Discount"
+                : "Amount off"
+          }
+          type="number"
+          min={0}
+          max={activePricingType === "PERCENT_OFF" ? 100 : undefined}
+          value={activePricingValue}
+          onChange={(value) =>
+            type === "FIXED"
+              ? updateActivePackage({ pricingValue: value })
+              : setPricingValue(value)
+          }
+          autoComplete="off"
+          prefix={activePricingType === "PERCENT_OFF" ? undefined : "$"}
+          suffix={activePricingType === "PERCENT_OFF" ? "%" : undefined}
+          error={pricingValueError}
+        />
+      </div>
+      {type === "FIXED" && paidItems.length > 0 && (
+        <Box background="bg-surface-secondary" borderRadius="200" padding="300">
+          <BlockStack gap="200">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="span" variant="bodyMd" tone="subdued">
+                Original price (compare-at)
+              </Text>
+              <Text
+                as="span"
+                variant="bodyMd"
+                tone="subdued"
+                textDecorationLine={
+                  savings > 0 ? "line-through" : undefined
+                }
+              >
+                ${combinedPrice.toFixed(2)}
+              </Text>
+            </InlineStack>
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="span" variant="bodyMd">
+                Bundle price
+              </Text>
+              <Text as="span" variant="bodyMd" fontWeight="semibold">
+                ${computedBundlePrice.toFixed(2)}
+              </Text>
+            </InlineStack>
+            <Divider />
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="span" variant="bodyMd" fontWeight="semibold">
+                Customer saves
+              </Text>
+              <Text
+                as="span"
+                variant="bodyMd"
+                fontWeight="semibold"
+                tone={savings > 0 ? "success" : "subdued"}
+              >
+                ${Math.max(0, savings).toFixed(2)}
+                {savings > 0 && combinedPrice > 0
+                  ? ` (${Math.round((savings / combinedPrice) * 100)}%)`
+                  : ""}
+              </Text>
+            </InlineStack>
+            {savings > 0 ? (
+              <Text as="p" variant="bodySm" tone="subdued">
+                The original ${combinedPrice.toFixed(2)} combined
+                price is set as the compare-at (strikethrough)
+                price on the bundle product.
+              </Text>
+            ) : (
+              <Text as="p" variant="bodySm" tone="caution">
+                The bundle price isn&apos;t below the combined
+                price of its products, so no compare-at price
+                will be shown to customers.
+              </Text>
+            )}
+            {hasMissingPrices && (
+              <Text as="p" variant="bodySm" tone="caution">
+                Some product prices couldn&apos;t be loaded, so
+                these totals may be incomplete.
+              </Text>
+            )}
+          </BlockStack>
+        </Box>
+      )}
+    </BlockStack>
+  );
+
+  const packagesTabsSection = packages.length > 1 && (
+    <>
+      <InlineStack gap="200" wrap>
+        {packages.map((pkg, index) => (
+          <PackageTab
+            key={pkg.id ?? pkg.tempKey}
+            label={pkg.label}
+            badgeText={pkg.badgeText}
+            badgeTone={pkg.badgeTone}
+            selected={index === activePackageIndex}
+            onSelect={() => setActivePackageIndex(index)}
+          />
+        ))}
+      </InlineStack>
+      <InlineStack gap="300" wrap blockAlign="end">
+        <div style={{ minWidth: 200, flex: 1 }}>
+          <TextField
+            label="Package title"
+            value={packages[activePackageIndex]?.label ?? ""}
+            onChange={(value) => updateActivePackage({ label: value })}
+            autoComplete="off"
+            placeholder="e.g. 2 Pack"
+          />
+        </div>
+        <div style={{ width: 160 }}>
+          <Select
+            label="Badge"
+            options={BADGE_TONE_OPTIONS}
+            value={packages[activePackageIndex]?.badgeTone ?? ""}
+            onChange={(value) => updateActivePackage({ badgeTone: value })}
+          />
+        </div>
+        <div style={{ minWidth: 160, flex: 1 }}>
+          <TextField
+            label="Badge text"
+            value={packages[activePackageIndex]?.badgeText ?? ""}
+            onChange={(value) => updateActivePackage({ badgeText: value })}
+            autoComplete="off"
+            placeholder="e.g. Best value"
+          />
+        </div>
+        <Button
+          icon={DeleteIcon}
+          variant="tertiary"
+          tone="critical"
+          accessibilityLabel="Remove package"
+          disabled={packages.length <= 1}
+          onClick={removeActivePackage}
+        >
+          Remove package
+        </Button>
+      </InlineStack>
+    </>
+  );
 
   return (
     <Page
@@ -1041,7 +1721,9 @@ export default function BundleBuilder() {
           </Banner>
         )}
 
-        {items.some((i) => i.missing) && (
+        {(type === "FIXED"
+          ? packages.some((pkg) => pkg.items.some((i) => i.missing))
+          : items.some((i) => i.missing)) && (
           <Banner tone="critical" title="Some products no longer exist">
             <p>
               Products marked &quot;Deleted from store&quot; were removed from
@@ -1106,505 +1788,154 @@ export default function BundleBuilder() {
                 </BlockStack>
               </Card>
 
-              <Card>
-                <BlockStack gap="400">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h2" variant="headingMd">
-                      {type === "FIXED" ? "Products in bundle" : "Product pool"}
-                    </Text>
-                    {showCollectionPool ? (
-                      <Button icon={PlusIcon} onClick={openCollectionPicker}>
-                        Add collections
-                      </Button>
-                    ) : (
-                      <Button icon={PlusIcon} onClick={() => openResourcePicker(false)}>
-                        Add products
-                      </Button>
-                    )}
-                  </InlineStack>
-                  {type !== "FIXED" && (
-                    <ChoiceList
-                      title="Customers pick from"
-                      choices={[
-                        {
-                          label: "Specific products",
-                          value: "PRODUCTS",
-                          helpText: "Hand-pick the products shown in the selection panel.",
-                        },
-                        {
-                          label: "Collections",
-                          value: "COLLECTIONS",
-                          helpText:
-                            "Show every product from the chosen collections — stays up to date automatically.",
-                        },
-                      ]}
-                      selected={[poolSource]}
-                      onChange={(value) => setPoolSource(value[0])}
-                    />
-                  )}
-                  {showCollectionPool ? (
-                    collections.length === 0 ? (
-                      <Box padding="400">
-                        <Text as="p" tone="subdued" alignment="center">
-                          Select the collections customers can pick products from.
-                        </Text>
-                      </Box>
-                    ) : (
-                      <BlockStack gap="300">
-                        {collections.map((collection, index) => (
-                          <Box key={collection.id}>
-                            {index > 0 && <Box paddingBlockEnd="300"><Divider /></Box>}
-                            <InlineStack
-                              gap="300"
-                              blockAlign="center"
-                              align="space-between"
-                              wrap={false}
-                            >
-                              <InlineStack gap="300" blockAlign="center" wrap={false}>
-                                <Thumbnail
-                                  source={collection.imageUrl || ImageIcon}
-                                  alt={collection.title}
-                                  size="small"
-                                />
-                                <Text as="span" variant="bodyMd" fontWeight="medium">
-                                  {collection.title}
-                                </Text>
-                              </InlineStack>
-                              <Button
-                                icon={DeleteIcon}
-                                variant="tertiary"
-                                tone="critical"
-                                accessibilityLabel={`Remove ${collection.title}`}
-                                onClick={() =>
-                                  setCollections((current) =>
-                                    current.filter((_, i) => i !== index),
-                                  )
-                                }
-                              />
-                            </InlineStack>
-                          </Box>
-                        ))}
-                      </BlockStack>
-                    )
-                  ) : paidItems.length === 0 ? (
-                    <Box padding="400">
-                      <Text as="p" tone="subdued" alignment="center">
-                        {type === "FIXED"
-                          ? "Add the products this bundle contains."
-                          : "Add the products customers can pick from."}
-                      </Text>
-                    </Box>
-                  ) : (
-                    <BlockStack gap="300">
-                      {paidItems.map((item, index) => (
-                        <Box key={item.variantId ?? item.productId}>
-                          {index > 0 && <Box paddingBlockEnd="300"><Divider /></Box>}
-                          <InlineStack
-                            gap="300"
-                            blockAlign="center"
-                            align="space-between"
-                            wrap={false}
-                          >
-                            <InlineStack gap="300" blockAlign="center" wrap={false}>
-                              <Thumbnail
-                                source={item.productImageUrl || ImageIcon}
-                                alt={item.productTitle}
-                                size="small"
-                              />
-                              <BlockStack gap="050">
-                                <InlineStack gap="200" blockAlign="center">
-                                  <Text as="span" variant="bodyMd" fontWeight="medium">
-                                    {item.productTitle}
-                                  </Text>
-                                  {item.missing && (
-                                    <Badge tone="critical">Deleted from store</Badge>
-                                  )}
-                                </InlineStack>
-                                {item.price != null && (
-                                  <Text as="span" variant="bodySm" tone="subdued">
-                                    ${item.price.toFixed(2)}
-                                    {type === "FIXED" && item.quantity > 1
-                                      ? ` × ${item.quantity} = $${(item.price * item.quantity).toFixed(2)}`
-                                      : ""}
-                                  </Text>
-                                )}
-                              </BlockStack>
-                            </InlineStack>
-                            <InlineStack gap="200" blockAlign="center" wrap={false}>
-                              {type === "FIXED" && (
-                                <div style={{ width: 90 }}>
-                                  <TextField
-                                    label="Qty"
-                                    labelHidden
-                                    type="number"
-                                    min={1}
-                                    value={String(item.quantity)}
-                                    onChange={(value) =>
-                                      setItems((current) =>
-                                        current.map((c) =>
-                                          (c.variantId ?? c.productId) ===
-                                          (item.variantId ?? item.productId)
-                                            ? { ...c, quantity: Math.max(1, parseInt(value, 10) || 1) }
-                                            : c,
-                                        ),
-                                      )
-                                    }
-                                    autoComplete="off"
-                                    prefix="×"
-                                  />
-                                </div>
-                              )}
-                              <Button
-                                icon={DeleteIcon}
-                                variant="tertiary"
-                                tone="critical"
-                                accessibilityLabel={`Remove ${item.productTitle}`}
-                                onClick={() =>
-                                  setItems((current) =>
-                                    current.filter(
-                                      (c) =>
-                                        (c.variantId ?? c.productId) !==
-                                        (item.variantId ?? item.productId),
-                                    ),
-                                  )
-                                }
-                              />
-                            </InlineStack>
-                          </InlineStack>
-                        </Box>
-                      ))}
-                    </BlockStack>
-                  )}
-                </BlockStack>
-              </Card>
-
-              {type === "FIXED" && (
+              {type === "FIXED" ? (
                 <Card>
                   <BlockStack gap="400">
                     <InlineStack align="space-between" blockAlign="center">
                       <Text as="h2" variant="headingMd">
-                        Free gifts
+                        Packages
                       </Text>
-                      <Button icon={PlusIcon} onClick={() => openResourcePicker(true)}>
-                        Add free gift
+                      <Button icon={PlusIcon} onClick={addPackage}>
+                        Add package
                       </Button>
                     </InlineStack>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Optional. These products are always included at $0
-                      alongside the bundle — they don&apos;t affect its price.
-                    </Text>
-                    <Checkbox
-                      label="Include free shipping as a gift"
-                      checked={freeShipping}
-                      onChange={setFreeShipping}
-                      helpText="Waives shipping at checkout when a customer buys this bundle."
-                    />
-                    {giftItems.length === 0 ? (
-                      <Box padding="400">
-                        <Text as="p" tone="subdued" alignment="center">
-                          No free gifts added.
-                        </Text>
-                      </Box>
-                    ) : (
-                      <BlockStack gap="300">
-                        {giftItems.map((item, index) => (
-                          <Box key={item.variantId ?? item.productId}>
-                            {index > 0 && <Box paddingBlockEnd="300"><Divider /></Box>}
-                            <InlineStack
-                              gap="300"
-                              blockAlign="center"
-                              align="space-between"
-                              wrap={false}
-                            >
-                              <InlineStack gap="300" blockAlign="center" wrap={false}>
-                                <Thumbnail
-                                  source={item.productImageUrl || ImageIcon}
-                                  alt={item.productTitle}
-                                  size="small"
-                                />
-                                <BlockStack gap="050" inlineAlign="start">
-                                  <InlineStack gap="200" blockAlign="center">
-                                    <Text as="span" variant="bodyMd" fontWeight="medium">
-                                      {item.productTitle}
-                                    </Text>
-                                    {item.missing && (
-                                      <Badge tone="critical">Deleted from store</Badge>
-                                    )}
-                                  </InlineStack>
-                                  <Badge tone="success">Free gift</Badge>
-                                </BlockStack>
-                              </InlineStack>
-                              <InlineStack gap="200" blockAlign="center" wrap={false}>
-                                <div style={{ width: 90 }}>
-                                  <TextField
-                                    label="Qty"
-                                    labelHidden
-                                    type="number"
-                                    min={1}
-                                    value={String(item.quantity)}
-                                    onChange={(value) =>
-                                      setItems((current) =>
-                                        current.map((c) =>
-                                          (c.variantId ?? c.productId) ===
-                                          (item.variantId ?? item.productId)
-                                            ? { ...c, quantity: Math.max(1, parseInt(value, 10) || 1) }
-                                            : c,
-                                        ),
-                                      )
-                                    }
-                                    autoComplete="off"
-                                    prefix="×"
-                                  />
-                                </div>
-                                <Button
-                                  icon={DeleteIcon}
-                                  variant="tertiary"
-                                  tone="critical"
-                                  accessibilityLabel={`Remove ${item.productTitle}`}
-                                  onClick={() =>
-                                    setItems((current) =>
-                                      current.filter(
-                                        (c) =>
-                                          (c.variantId ?? c.productId) !==
-                                          (item.variantId ?? item.productId),
-                                      ),
-                                    )
-                                  }
-                                />
-                              </InlineStack>
-                            </InlineStack>
-                          </Box>
-                        ))}
-                      </BlockStack>
-                    )}
-                  </BlockStack>
-                </Card>
-              )}
-
-              {type === "SLOT_BUILDER" && (
-                <Card>
-                  <BlockStack gap="400">
-                    <Text as="h2" variant="headingMd">
-                      Slots
-                    </Text>
-                    <div style={{ maxWidth: 200 }}>
-                      <TextField
-                        label="Number of slots"
-                        type="number"
-                        min={2}
-                        value={slotCount}
-                        onChange={setSlotCount}
-                        autoComplete="off"
-                        helpText="Customers fill every slot to complete the bundle."
-                      />
-                    </div>
-                  </BlockStack>
-                </Card>
-              )}
-
-              {type !== "MIX_MATCH" ? (
-                <Card>
-                  <BlockStack gap="400">
-                    <Text as="h2" variant="headingMd">
-                      Pricing
-                    </Text>
-                    <ChoiceList
-                      title="Pricing"
-                      titleHidden
-                      choices={[
-                        { label: "Fixed bundle price", value: "FIXED_PRICE" },
-                        { label: "Percentage off combined price", value: "PERCENT_OFF" },
-                        { label: "Amount off combined price", value: "AMOUNT_OFF" },
-                      ]}
-                      selected={[pricingType]}
-                      onChange={(value) => setPricingType(value[0])}
-                    />
-                    <div style={{ maxWidth: 200 }}>
-                      <TextField
-                        label={
-                          pricingType === "FIXED_PRICE"
-                            ? "Bundle price"
-                            : pricingType === "PERCENT_OFF"
-                              ? "Discount"
-                              : "Amount off"
-                        }
-                        type="number"
-                        min={0}
-                        max={pricingType === "PERCENT_OFF" ? 100 : undefined}
-                        value={pricingValue}
-                        onChange={setPricingValue}
-                        autoComplete="off"
-                        prefix={pricingType === "PERCENT_OFF" ? undefined : "$"}
-                        suffix={pricingType === "PERCENT_OFF" ? "%" : undefined}
-                        error={pricingValueError}
-                      />
-                    </div>
-                    {type === "FIXED" && paidItems.length > 0 && (
-                      <Box background="bg-surface-secondary" borderRadius="200" padding="300">
-                        <BlockStack gap="200">
-                          <InlineStack align="space-between" blockAlign="center">
-                            <Text as="span" variant="bodyMd" tone="subdued">
-                              Original price (compare-at)
-                            </Text>
-                            <Text
-                              as="span"
-                              variant="bodyMd"
-                              tone="subdued"
-                              textDecorationLine={
-                                savings > 0 ? "line-through" : undefined
-                              }
-                            >
-                              ${combinedPrice.toFixed(2)}
-                            </Text>
-                          </InlineStack>
-                          <InlineStack align="space-between" blockAlign="center">
-                            <Text as="span" variant="bodyMd">
-                              Bundle price
-                            </Text>
-                            <Text as="span" variant="bodyMd" fontWeight="semibold">
-                              ${computedBundlePrice.toFixed(2)}
-                            </Text>
-                          </InlineStack>
-                          <Divider />
-                          <InlineStack align="space-between" blockAlign="center">
-                            <Text as="span" variant="bodyMd" fontWeight="semibold">
-                              Customer saves
-                            </Text>
-                            <Text
-                              as="span"
-                              variant="bodyMd"
-                              fontWeight="semibold"
-                              tone={savings > 0 ? "success" : "subdued"}
-                            >
-                              ${Math.max(0, savings).toFixed(2)}
-                              {savings > 0 && combinedPrice > 0
-                                ? ` (${Math.round((savings / combinedPrice) * 100)}%)`
-                                : ""}
-                            </Text>
-                          </InlineStack>
-                          {savings > 0 ? (
-                            <Text as="p" variant="bodySm" tone="subdued">
-                              The original ${combinedPrice.toFixed(2)} combined
-                              price is set as the compare-at (strikethrough)
-                              price on the bundle product.
-                            </Text>
-                          ) : (
-                            <Text as="p" variant="bodySm" tone="caution">
-                              The bundle price isn&apos;t below the combined
-                              price of its products, so no compare-at price
-                              will be shown to customers.
-                            </Text>
-                          )}
-                          {hasMissingPrices && (
-                            <Text as="p" variant="bodySm" tone="caution">
-                              Some product prices couldn&apos;t be loaded, so
-                              these totals may be incomplete.
-                            </Text>
-                          )}
-                        </BlockStack>
-                      </Box>
-                    )}
+                    {packagesTabsSection}
+                    <Divider />
+                    {productsSection}
+                    <Divider />
+                    {giftsSection}
+                    <Divider />
+                    {pricingSection}
                   </BlockStack>
                 </Card>
               ) : (
-                <Card>
-                  <BlockStack gap="400">
-                    <Text as="h2" variant="headingMd">
-                      Rules &amp; discount tiers
-                    </Text>
-                    <InlineStack gap="400">
-                      <div style={{ width: 140 }}>
-                        <TextField
-                          label="Minimum items"
-                          type="number"
-                          min={1}
-                          value={minItems}
-                          onChange={setMinItems}
-                          autoComplete="off"
-                        />
-                      </div>
-                      <div style={{ width: 140 }}>
-                        <TextField
-                          label="Maximum items"
-                          type="number"
-                          value={maxItems}
-                          onChange={setMaxItems}
-                          autoComplete="off"
-                          placeholder="No limit"
-                        />
-                      </div>
-                    </InlineStack>
-                    <Divider />
-                    <BlockStack gap="300">
-                      <Text as="h3" variant="headingSm">
-                        Discount tiers
-                      </Text>
-                      {tiers.map((tier, index) => (
-                        <InlineStack key={index} gap="200" blockAlign="end" wrap={false}>
+                <>
+                  <Card>{productsSection}</Card>
+
+                  {type === "SLOT_BUILDER" && (
+                    <Card>
+                      <BlockStack gap="400">
+                        <Text as="h2" variant="headingMd">
+                          Slots
+                        </Text>
+                        <div style={{ maxWidth: 200 }}>
+                          <TextField
+                            label="Number of slots"
+                            type="number"
+                            min={2}
+                            value={slotCount}
+                            onChange={setSlotCount}
+                            autoComplete="off"
+                            helpText="Customers fill every slot to complete the bundle."
+                          />
+                        </div>
+                      </BlockStack>
+                    </Card>
+                  )}
+
+                  {type !== "MIX_MATCH" ? (
+                    <Card>{pricingSection}</Card>
+                  ) : (
+                    <Card>
+                      <BlockStack gap="400">
+                        <Text as="h2" variant="headingMd">
+                          Rules &amp; discount tiers
+                        </Text>
+                        <InlineStack gap="400">
                           <div style={{ width: 140 }}>
                             <TextField
-                              label="Buy at least"
+                              label="Minimum items"
                               type="number"
                               min={1}
-                              value={tier.quantity}
-                              onChange={(value) =>
-                                setTiers((current) =>
-                                  current.map((t, i) =>
-                                    i === index ? { ...t, quantity: value } : t,
-                                  ),
-                                )
-                              }
+                              value={minItems}
+                              onChange={setMinItems}
                               autoComplete="off"
-                              suffix="items"
                             />
                           </div>
                           <div style={{ width: 140 }}>
                             <TextField
-                              label="Get discount"
+                              label="Maximum items"
                               type="number"
-                              min={0}
-                              value={tier.discount}
-                              onChange={(value) =>
-                                setTiers((current) =>
-                                  current.map((t, i) =>
-                                    i === index ? { ...t, discount: value } : t,
-                                  ),
-                                )
-                              }
+                              value={maxItems}
+                              onChange={setMaxItems}
                               autoComplete="off"
-                              suffix="%"
+                              placeholder="No limit"
                             />
                           </div>
-                          <Button
-                            icon={DeleteIcon}
-                            variant="tertiary"
-                            accessibilityLabel="Remove tier"
-                            onClick={() =>
-                              setTiers((current) =>
-                                current.filter((_, i) => i !== index),
-                              )
-                            }
-                            disabled={tiers.length === 1}
-                          />
                         </InlineStack>
-                      ))}
-                      <div>
-                        <Button
-                          icon={PlusIcon}
-                          variant="plain"
-                          onClick={() =>
-                            setTiers((current) => [
-                              ...current,
-                              { quantity: "", discount: "" },
-                            ])
-                          }
-                        >
-                          Add tier
-                        </Button>
-                      </div>
-                    </BlockStack>
-                  </BlockStack>
-                </Card>
+                        <Divider />
+                        <BlockStack gap="300">
+                          <Text as="h3" variant="headingSm">
+                            Discount tiers
+                          </Text>
+                          {tiers.map((tier, index) => (
+                            <InlineStack key={index} gap="200" blockAlign="end" wrap={false}>
+                              <div style={{ width: 140 }}>
+                                <TextField
+                                  label="Buy at least"
+                                  type="number"
+                                  min={1}
+                                  value={tier.quantity}
+                                  onChange={(value) =>
+                                    setTiers((current) =>
+                                      current.map((t, i) =>
+                                        i === index ? { ...t, quantity: value } : t,
+                                      ),
+                                    )
+                                  }
+                                  autoComplete="off"
+                                  suffix="items"
+                                />
+                              </div>
+                              <div style={{ width: 140 }}>
+                                <TextField
+                                  label="Get discount"
+                                  type="number"
+                                  min={0}
+                                  value={tier.discount}
+                                  onChange={(value) =>
+                                    setTiers((current) =>
+                                      current.map((t, i) =>
+                                        i === index ? { ...t, discount: value } : t,
+                                      ),
+                                    )
+                                  }
+                                  autoComplete="off"
+                                  suffix="%"
+                                />
+                              </div>
+                              <Button
+                                icon={DeleteIcon}
+                                variant="tertiary"
+                                accessibilityLabel="Remove tier"
+                                onClick={() =>
+                                  setTiers((current) =>
+                                    current.filter((_, i) => i !== index),
+                                  )
+                                }
+                                disabled={tiers.length === 1}
+                              />
+                            </InlineStack>
+                          ))}
+                          <div>
+                            <Button
+                              icon={PlusIcon}
+                              variant="plain"
+                              onClick={() =>
+                                setTiers((current) => [
+                                  ...current,
+                                  { quantity: "", discount: "" },
+                                ])
+                              }
+                            >
+                              Add tier
+                            </Button>
+                          </div>
+                        </BlockStack>
+                      </BlockStack>
+                    </Card>
+                  )}
+                </>
               )}
 
               {type === "FIXED" && (
@@ -1768,7 +2099,7 @@ export default function BundleBuilder() {
                     </>
                   ) : (
                     <>
-                      {items.slice(0, 5).map((item) => (
+                      {activeItems.slice(0, 5).map((item) => (
                         <InlineStack key={item.productId} gap="200" blockAlign="center" wrap={false}>
                           <Thumbnail
                             source={item.productImageUrl || ImageIcon}
@@ -1781,12 +2112,12 @@ export default function BundleBuilder() {
                           </Text>
                         </InlineStack>
                       ))}
-                      {items.length > 5 && (
+                      {activeItems.length > 5 && (
                         <Text as="span" variant="bodySm" tone="subdued">
-                          +{items.length - 5} more
+                          +{activeItems.length - 5} more
                         </Text>
                       )}
-                      {items.length === 0 && (
+                      {activeItems.length === 0 && (
                         <Text as="span" variant="bodySm" tone="subdued">
                           No products yet
                         </Text>

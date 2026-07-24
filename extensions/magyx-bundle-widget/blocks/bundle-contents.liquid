@@ -6,23 +6,39 @@
 {%- endcomment -%}
 {%- assign bundle_data = product.metafields.magyx_bundle.components.value -%}
 {%- comment -%}
-  Bundles published before per-bundle appearance settings existed wrote this
-  metafield as a bare array of items. Fall back to that shape (with default
-  settings) so older bundles don't go blank until they're re-saved.
+  Three possible shapes, oldest to newest:
+  - a bare array of items (bundles published before per-bundle appearance
+    settings existed)
+  - { settings, items } — a single-package FIXED bundle (today's default)
+  - { settings, packages: [{ variantId, label, badgeText, badgeTone,
+    freeShipping, items }, ...] } — a bundle with more than one package
 {%- endcomment -%}
-{%- if bundle_data.items -%}
-  {%- assign bundle_items = bundle_data.items -%}
+{%- if bundle_data.packages and bundle_data.packages.size > 0 -%}
+  {%- assign is_multi_pack = true -%}
+  {%- assign packages = bundle_data.packages -%}
+  {%- assign settings = bundle_data.settings -%}
+{%- elsif bundle_data.items -%}
+  {%- assign is_multi_pack = false -%}
+  {%- assign single_items = bundle_data.items -%}
   {%- assign settings = bundle_data.settings -%}
 {%- else -%}
-  {%- assign bundle_items = bundle_data -%}
+  {%- assign is_multi_pack = false -%}
+  {%- assign single_items = bundle_data -%}
   {%- assign settings = blank -%}
 {%- endif -%}
-{%- if bundle_items and bundle_items.size > 0 -%}
+
+{%- assign has_content = false -%}
+{%- if is_multi_pack and packages.size > 0 -%}
+  {%- assign has_content = true -%}
+{%- elsif single_items and single_items.size > 0 -%}
+  {%- assign has_content = true -%}
+{%- endif -%}
+
+{%- if has_content -%}
   {%- assign style = settings.style | default: "numbered" -%}
   {%- assign heading = settings.heading -%}
   {%- assign accent = settings.accentColor | default: "#1a1a1a" -%}
   {%- assign show_prices = settings.showPrices -%}
-  {%- assign free_shipping = settings.freeShipping -%}
   <div
     class="magyx-bundle-contents magyx-bundle-contents--{{ style }}"
     style="--bc-accent: {{ accent }};"
@@ -30,16 +46,35 @@
   >
     {%- comment -%}
       Consumed by magyx-bundle-fixed.js to stamp "Item N" properties onto the
-      bundle's own cart line at add-to-cart time, so the properties show up
-      on the parent bundle line rather than on its expanded children.
+      bundle's own cart line at add-to-cart time (so they show up on the
+      parent bundle line rather than its expanded children), and — when
+      there's more than one package — to switch the active variant/panel
+      when a shopper taps a package tab.
     {%- endcomment -%}
     <script type="application/json" data-magyx-bundle-data>
       {
-        "variantIds": {{ product.variants | map: "id" | json }},
-        "items": [
-          {%- for item in bundle_items -%}
-            { "title": {{ item.title | json }}, "quantity": {{ item.quantity | default: 1 }}, "isGift": {{ item.isGift | default: false }} }{%- unless forloop.last -%},{%- endunless -%}
-          {%- endfor -%}
+        "packages": [
+          {%- if is_multi_pack -%}
+            {%- for pkg in packages -%}
+              {
+                "variantId": {{ pkg.variantId | json }},
+                "items": [
+                  {%- for item in pkg.items -%}
+                    { "title": {{ item.title | json }}, "quantity": {{ item.quantity | default: 1 }}, "isGift": {{ item.isGift | default: false }} }{%- unless forloop.last -%},{%- endunless -%}
+                  {%- endfor -%}
+                ]
+              }{%- unless forloop.last -%},{%- endunless -%}
+            {%- endfor -%}
+          {%- else -%}
+            {
+              "variantId": {{ product.variants.first.id | json }},
+              "items": [
+                {%- for item in single_items -%}
+                  { "title": {{ item.title | json }}, "quantity": {{ item.quantity | default: 1 }}, "isGift": {{ item.isGift | default: false }} }{%- unless forloop.last -%},{%- endunless -%}
+                {%- endfor -%}
+              ]
+            }
+          {%- endif -%}
         ]
       }
     </script>
@@ -47,173 +82,36 @@
       <p class="magyx-bundle-contents__heading">{{ heading }}</p>
     {%- endif -%}
 
-    {%- case style -%}
-      {%- when "grid" -%}
-        <div class="magyx-bundle-contents__grid">
-          {%- for item in bundle_items -%}
-            {%- unless item.isGift -%}
-              <div class="magyx-bundle-contents__tile">
-                <div class="magyx-bundle-contents__tile-image-wrap">
-                  {%- if item.imageUrl -%}
-                    <img
-                      class="magyx-bundle-contents__tile-image"
-                      src="{{ item.imageUrl }}"
-                      alt="{{ item.title | escape }}"
-                      loading="lazy"
-                      width="120"
-                      height="120"
-                    >
-                  {%- else -%}
-                    <span class="magyx-bundle-contents__tile-image magyx-bundle-contents__image--placeholder"></span>
-                  {%- endif -%}
-                  {%- if item.quantity > 1 -%}
-                    <span class="magyx-bundle-contents__tile-qty">×{{ item.quantity }}</span>
-                  {%- endif -%}
-                </div>
-                <p class="magyx-bundle-contents__tile-title">{{ item.title }}</p>
-                {%- if item.subtext != blank -%}
-                  <p class="magyx-bundle-contents__tile-subtext">{{ item.subtext }}</p>
-                {%- endif -%}
-                {%- if show_prices and item.price -%}
-                  {%- assign item_cents = item.price | times: 100 | round -%}
-                  <p class="magyx-bundle-contents__tile-price">{{ item_cents | money }}</p>
-                {%- endif -%}
-              </div>
-            {%- endunless -%}
-          {%- endfor -%}
-        </div>
-
-      {%- when "minimal" -%}
-        <div class="magyx-bundle-contents__rows">
-          {%- for item in bundle_items -%}
-            {%- unless item.isGift -%}
-              <div class="magyx-bundle-contents__row">
-                <span class="magyx-bundle-contents__check" aria-hidden="true"></span>
-                {%- if item.imageUrl -%}
-                  <img
-                    class="magyx-bundle-contents__row-image"
-                    src="{{ item.imageUrl }}"
-                    alt="{{ item.title | escape }}"
-                    loading="lazy"
-                    width="36"
-                    height="36"
-                  >
-                {%- else -%}
-                  <span class="magyx-bundle-contents__row-image magyx-bundle-contents__image--placeholder"></span>
-                {%- endif -%}
-                <span class="magyx-bundle-contents__row-text">
-                  <span class="magyx-bundle-contents__row-title">
-                    {%- if item.quantity > 1 -%}{{ item.quantity }} × {% endif -%}
-                    {{- item.title -}}
-                  </span>
-                  {%- if item.subtext != blank -%}
-                    <span class="magyx-bundle-contents__row-subtext">{{ item.subtext }}</span>
-                  {%- endif -%}
-                </span>
-                {%- if show_prices and item.price -%}
-                  {%- assign item_cents = item.price | times: 100 | round -%}
-                  <span class="magyx-bundle-contents__row-price">{{ item_cents | money }}</span>
-                {%- endif -%}
-              </div>
-            {%- endunless -%}
-          {%- endfor -%}
-        </div>
-
-      {%- else -%}
-        <div class="magyx-bundle-contents__list">
-          {%- assign item_number = 0 -%}
-          {%- for item in bundle_items -%}
-            {%- unless item.isGift -%}
-              {%- assign item_number = item_number | plus: 1 -%}
-              <div class="magyx-bundle-contents__item">
-                <span class="magyx-bundle-contents__num">{{ item_number }}</span>
-                {%- if item.imageUrl -%}
-                  <img
-                    class="magyx-bundle-contents__image"
-                    src="{{ item.imageUrl }}"
-                    alt="{{ item.title | escape }}"
-                    loading="lazy"
-                    width="64"
-                    height="64"
-                  >
-                {%- else -%}
-                  <span class="magyx-bundle-contents__image magyx-bundle-contents__image--placeholder"></span>
-                {%- endif -%}
-                <div class="magyx-bundle-contents__info">
-                  <p class="magyx-bundle-contents__title">
-                    {%- if item.quantity > 1 -%}{{ item.quantity }} × {% endif -%}
-                    {{- item.title -}}
-                  </p>
-                  {%- if item.subtext != blank -%}
-                    <p class="magyx-bundle-contents__subtext">{{ item.subtext }}</p>
-                  {%- endif -%}
-                  {%- if show_prices and item.price -%}
-                    {%- assign item_cents = item.price | times: 100 | round -%}
-                    <p class="magyx-bundle-contents__price">{{ item_cents | money }}</p>
-                  {%- endif -%}
-                </div>
-              </div>
-            {%- endunless -%}
-          {%- endfor -%}
-        </div>
-    {%- endcase -%}
-
-    {%- assign has_gifts = free_shipping -%}
-    {%- unless has_gifts -%}
-      {%- for item in bundle_items -%}
-        {%- if item.isGift -%}
-          {%- assign has_gifts = true -%}
-          {%- break -%}
-        {%- endif -%}
-      {%- endfor -%}
-    {%- endunless -%}
-
-    {%- if has_gifts -%}
-      <p class="magyx-bundle-contents__heading magyx-bundle-contents__heading--gifts">Free Gifts</p>
-      <div class="magyx-bundle-contents__grid magyx-bundle-contents__grid--gifts">
-        {%- if free_shipping -%}
-          <div class="magyx-bundle-contents__tile">
-            <div class="magyx-bundle-contents__tile-image-wrap">
-              <span class="magyx-bundle-contents__tile-shipping-box">Free Shipping</span>
-            </div>
-          </div>
-        {%- endif -%}
-        {%- for item in bundle_items -%}
-          {%- if item.isGift -%}
-            <div class="magyx-bundle-contents__tile">
-              <div class="magyx-bundle-contents__tile-image-wrap">
-                {%- if item.imageUrl -%}
-                  <img
-                    class="magyx-bundle-contents__tile-image"
-                    src="{{ item.imageUrl }}"
-                    alt="{{ item.title | escape }}"
-                    loading="lazy"
-                    width="120"
-                    height="120"
-                  >
-                {%- else -%}
-                  <span class="magyx-bundle-contents__tile-image magyx-bundle-contents__image--placeholder"></span>
-                {%- endif -%}
-                <span class="magyx-bundle-contents__tile-gift-badge">
-                  {%- if item.price -%}
-                    {%- assign item_cents = item.price | times: 100 | round -%}
-                    {{ item_cents | money }} value
-                  {%- else -%}
-                    Free gift
-                  {%- endif -%}
-                </span>
-                {%- if item.quantity > 1 -%}
-                  <span class="magyx-bundle-contents__tile-qty">×{{ item.quantity }}</span>
-                {%- endif -%}
-              </div>
-              <p class="magyx-bundle-contents__tile-title">{{ item.title }}</p>
-              {%- if item.subtext != blank -%}
-                <p class="magyx-bundle-contents__tile-subtext">{{ item.subtext }}</p>
-              {%- endif -%}
-            </div>
-          {%- endif -%}
+    {%- if is_multi_pack and packages.size > 1 -%}
+      <div class="magyx-bundle-contents__packs" role="tablist">
+        {%- for pkg in packages -%}
+          <button
+            type="button"
+            class="magyx-bundle-contents__pack-tab{% if forloop.first %} magyx-bundle-contents__pack-tab--active{% endif %}"
+            data-magyx-pack-tab="{{ forloop.index0 }}"
+            aria-pressed="{{ forloop.first }}"
+          >
+            <span class="magyx-bundle-contents__pack-tab-label">{{ pkg.label }}</span>
+            {%- if pkg.badgeText != blank -%}
+              <span class="magyx-bundle-contents__pack-badge magyx-bundle-contents__pack-badge--{{ pkg.badgeTone | default: 'info' }}">{{ pkg.badgeText }}</span>
+            {%- endif -%}
+          </button>
         {%- endfor -%}
       </div>
+    {%- endif -%}
+
+    {%- if is_multi_pack -%}
+      {%- for pkg in packages -%}
+        <div
+          class="magyx-bundle-contents__pack-panel"
+          data-magyx-pack-panel="{{ forloop.index0 }}"
+          {% unless forloop.first %}hidden{% endunless %}
+        >
+          {%- render 'magyx-bundle-pack-panel', items: pkg.items, style: style, show_prices: show_prices, free_shipping: pkg.freeShipping -%}
+        </div>
+      {%- endfor -%}
+    {%- else -%}
+      {%- render 'magyx-bundle-pack-panel', items: single_items, style: style, show_prices: show_prices, free_shipping: settings.freeShipping -%}
     {%- endif -%}
   </div>
 {%- endif -%}

@@ -1,5 +1,5 @@
 import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
-import { getBundles, setBundleProduct } from "./bundle.server";
+import { getBundles, setBundleProduct, setPackageVariant } from "./bundle.server";
 
 const CONFIG_NAMESPACE = "$app:magyx-bundle";
 const CONFIG_KEY = "config";
@@ -72,7 +72,9 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
   if (active.length > 0) {
     await ensureCartTransformActivated(admin);
   }
-  if (active.some((b) => b.freeShipping)) {
+  // FIXED bundles carry freeShipping per package now; MIX_MATCH/SLOT_BUILDER
+  // still use the bundle-level flag.
+  if (active.some((b) => b.freeShipping || b.packages.some((p) => p.freeShipping))) {
     await ensureFreeShippingDiscountActivated(admin);
   }
 }
@@ -238,12 +240,23 @@ async function publishProductToOnlineStore(admin: AdminApiContext, productId: st
   }
 }
 
-interface FixedBundlePublishInput {
-  bundleId: string;
-  title: string;
-  description?: string | null;
+// One purchase option under the bundle (e.g. "2 Pack"). A bundle with exactly
+// one package publishes to a single-variant product identically to the
+// original single-config FIXED bundle; more than one package publishes N
+// variants (one per package) on the same product, each carrying its own
+// checkout-truth metafield.
+interface FixedBundlePackageInput {
+  packageId: string;
+  // The Shopify variant this package was last published to, if any — used to
+  // match packages to variants across saves (renames, additions, removals)
+  // instead of relying on label text, which merchants can freely edit.
+  existingVariantId?: string | null;
+  label: string;
+  badgeText?: string | null;
+  badgeTone?: string | null;
   pricingType: string;
   pricingValue: number;
+  freeShipping: boolean;
   componentVariantIds: { variantId: string; quantity: number; isGift?: boolean }[];
   // Denormalized item info for the storefront widget's "what's inside" cards
   displayItems: {
@@ -254,8 +267,16 @@ interface FixedBundlePublishInput {
     variantId: string | null;
     isGift?: boolean;
   }[];
+}
+
+interface FixedBundlePublishInput {
+  bundleId: string;
+  title: string;
+  description?: string | null;
+  packages: FixedBundlePackageInput[];
   // Appearance of the storefront "what's inside" widget — set entirely from
-  // the app admin, the theme block has no editable settings of its own
+  // the app admin, the theme block has no editable settings of its own.
+  // Shared across all packages of a bundle.
   widgetSettings: {
     style: string;
     heading: string;
@@ -263,9 +284,10 @@ interface FixedBundlePublishInput {
     showPrices: boolean;
     itemSubtextTemplate: string;
     showSubtextOnGifts: boolean;
-    freeShipping: boolean;
   };
 }
+
+const PACK_OPTION_NAME = "Pack";
 
 // {{metafield:ns.key}} reads a plain metafield's value. {{metafield:ns.key.value.field}}
 // mirrors Liquid's own `metafield.value.field` convention for a metaobject
@@ -493,8 +515,13 @@ export async function publishFixedBundleProduct(
   input: FixedBundlePublishInput,
   existingProductId?: string | null,
 ) {
-  // Snapshot component prices so the Cart Transform function can price the
-  // expanded components without a runtime lookup
+  const isMultiPack = input.packages.length > 1;
+
+  // Snapshot component prices (across every package) so the Cart Transform
+  // function can price each expanded package without a runtime lookup
+  const allComponentVariantIds = Array.from(
+    new Set(input.packages.flatMap((p) => p.componentVariantIds.map((c) => c.variantId))),
+  );
   const priceResponse = await admin.graphql(
     `#graphql
     query componentPrices($ids: [ID!]!) {
@@ -502,7 +529,7 @@ export async function publishFixedBundleProduct(
         ... on ProductVariant { id price }
       }
     }`,
-    { variables: { ids: input.componentVariantIds.map((c) => c.variantId) } },
+    { variables: { ids: allComponentVariantIds } },
   );
   const priceJson = await priceResponse.json();
   const priceByVariant = new Map<string, number>(
@@ -513,49 +540,52 @@ export async function publishFixedBundleProduct(
 
   // A component variant that no longer resolves means its product was deleted;
   // publishing anyway would ship a config the Cart Transform can't expand
-  const missingVariants = input.componentVariantIds.filter(
-    (c) => !priceByVariant.has(c.variantId),
-  );
-  if (missingVariants.length > 0) {
-    const missingIds = new Set(missingVariants.map((c) => c.variantId));
-    const missingTitles = input.displayItems
-      .filter((i) => i.variantId && missingIds.has(i.variantId))
-      .map((i) => `"${i.title}"`);
+  const missingVariantIds = allComponentVariantIds.filter((id) => !priceByVariant.has(id));
+  if (missingVariantIds.length > 0) {
+    const missingIds = new Set(missingVariantIds);
+    const missingTitles = new Set(
+      input.packages
+        .flatMap((p) => p.displayItems)
+        .filter((i) => i.variantId && missingIds.has(i.variantId))
+        .map((i) => `"${i.title}"`),
+    );
     throw new Error(
-      `${missingTitles.join(", ") || "Some products"} no longer exist in your store. Remove them from the bundle and save again.`,
+      `${Array.from(missingTitles).join(", ") || "Some products"} no longer exist in your store. Remove them from the bundle and save again.`,
     );
   }
 
-  const titleByVariant = new Map(
-    input.displayItems
-      .filter((i): i is typeof i & { variantId: string } => Boolean(i.variantId))
-      .map((i) => [i.variantId, i.title]),
-  );
-  const components = input.componentVariantIds.map((c) => ({
-    variantId: c.variantId,
-    quantity: c.quantity,
-    isGift: c.isGift ?? false,
-    // Gifts are always $0 — excluded from the bundle price allocation below,
-    // regardless of their real catalog price (used only for display)
-    price: c.isGift ? 0 : (priceByVariant.get(c.variantId) ?? 0),
-    // Carried through so the Cart Transform function can label each expanded
-    // cart line (it has no other way to look up product/variant titles)
-    title: titleByVariant.get(c.variantId) ?? "",
-  }));
-  const combinedPrice =
-    Math.round(
-      components.reduce((sum, c) => sum + c.price * c.quantity, 0) * 100,
-    ) / 100;
+  // Per-package price math — identical formula for every package, gifts are
+  // always $0 and excluded from the bundle price allocation
+  const packagePricing = input.packages.map((pkg) => {
+    const titleByVariant = new Map(
+      pkg.displayItems
+        .filter((i): i is typeof i & { variantId: string } => Boolean(i.variantId))
+        .map((i) => [i.variantId, i.title]),
+    );
+    const components = pkg.componentVariantIds.map((c) => ({
+      variantId: c.variantId,
+      quantity: c.quantity,
+      isGift: c.isGift ?? false,
+      price: c.isGift ? 0 : (priceByVariant.get(c.variantId) ?? 0),
+      // Carried through so the Cart Transform function can label each
+      // expanded cart line (it has no other way to look up titles)
+      title: titleByVariant.get(c.variantId) ?? "",
+    }));
+    const combinedPrice =
+      Math.round(components.reduce((sum, c) => sum + c.price * c.quantity, 0) * 100) / 100;
 
-  let bundlePrice: number;
-  if (input.pricingType === "FIXED_PRICE") {
-    bundlePrice = input.pricingValue;
-  } else if (input.pricingType === "PERCENT_OFF") {
-    bundlePrice = combinedPrice * (1 - input.pricingValue / 100);
-  } else {
-    bundlePrice = Math.max(0, combinedPrice - input.pricingValue);
-  }
-  bundlePrice = Math.round(bundlePrice * 100) / 100;
+    let bundlePrice: number;
+    if (pkg.pricingType === "FIXED_PRICE") {
+      bundlePrice = pkg.pricingValue;
+    } else if (pkg.pricingType === "PERCENT_OFF") {
+      bundlePrice = combinedPrice * (1 - pkg.pricingValue / 100);
+    } else {
+      bundlePrice = Math.max(0, combinedPrice - pkg.pricingValue);
+    }
+    bundlePrice = Math.round(bundlePrice * 100) / 100;
+
+    return { pkg, components, combinedPrice, bundlePrice };
+  });
 
   let productId = existingProductId ?? null;
 
@@ -564,10 +594,7 @@ export async function publishFixedBundleProduct(
       `#graphql
       mutation createBundleProduct($product: ProductCreateInput!) {
         productCreate(product: $product) {
-          product {
-            id
-            variants(first: 1) { edges { node { id } } }
-          }
+          product { id }
           userErrors { field message }
         }
       }`,
@@ -578,6 +605,19 @@ export async function publishFixedBundleProduct(
             descriptionHtml: input.description ?? "",
             tags: ["magyx-bundle"],
             status: "ACTIVE",
+            // A single package publishes exactly like the original
+            // single-config FIXED bundle: no product options, one default
+            // variant. Multiple packages get one "Pack" option value each.
+            ...(isMultiPack
+              ? {
+                  productOptions: [
+                    {
+                      name: PACK_OPTION_NAME,
+                      values: input.packages.map((p) => ({ name: p.label })),
+                    },
+                  ],
+                }
+              : {}),
           },
         },
       },
@@ -591,80 +631,69 @@ export async function publishFixedBundleProduct(
     await setBundleProduct(input.bundleId, productId!);
   }
 
-  const variantResponse = await admin.graphql(
-    `#graphql
-    query bundleProductVariant($id: ID!) {
-      product(id: $id) { variants(first: 1) { edges { node { id } } } }
-    }`,
-    { variables: { id: productId } },
-  );
-  const variantJson = await variantResponse.json();
-  const variantId =
-    variantJson.data?.product?.variants?.edges?.[0]?.node?.id;
-  if (!variantId) throw new Error("Bundle parent product has no variant");
+  const variantIdByPackageId = await resolvePackageVariants(admin, productId!, input.packages, isMultiPack);
+
+  // One bulk update covering every package's variant: price, compare-at
+  // price, and its own `$app:magyx-bundle/components` checkout-truth metafield
+  const variantUpdates = packagePricing.map(({ pkg, components, combinedPrice, bundlePrice }) => ({
+    id: variantIdByPackageId.get(pkg.packageId)!,
+    price: bundlePrice.toFixed(2),
+    // Combined component price as the strikethrough price; cleared when
+    // there's no actual saving so themes don't show "$X $X"
+    compareAtPrice: combinedPrice > bundlePrice ? combinedPrice.toFixed(2) : null,
+    metafields: [
+      {
+        namespace: CONFIG_NAMESPACE,
+        key: "components",
+        type: "json",
+        value: JSON.stringify({
+          pricingType: pkg.pricingType,
+          pricingValue: pkg.pricingValue,
+          components,
+          freeShipping: pkg.freeShipping,
+        }),
+      },
+    ],
+  }));
 
   const updateResponse = await admin.graphql(
     `#graphql
-    mutation updateBundleVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+    mutation updateBundleVariants($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
       productVariantsBulkUpdate(productId: $productId, variants: $variants) {
         productVariants { id }
         userErrors { field message }
       }
     }`,
-    {
-      variables: {
-        productId,
-        variants: [
-          {
-            id: variantId,
-            price: bundlePrice.toFixed(2),
-            // Combined component price as the strikethrough price; cleared
-            // when there's no actual saving so themes don't show "$X $X"
-            compareAtPrice:
-              combinedPrice > bundlePrice ? combinedPrice.toFixed(2) : null,
-            metafields: [
-              {
-                namespace: CONFIG_NAMESPACE,
-                key: "components",
-                type: "json",
-                value: JSON.stringify({
-                  pricingType: input.pricingType,
-                  pricingValue: input.pricingValue,
-                  components,
-                  freeShipping: input.widgetSettings.freeShipping,
-                }),
-              },
-            ],
-          },
-        ],
-      },
-    },
+    { variables: { productId, variants: variantUpdates } },
   );
   const updateJson = await updateResponse.json();
-  const updateErrors =
-    updateJson.data?.productVariantsBulkUpdate?.userErrors ?? [];
+  const updateErrors = updateJson.data?.productVariantsBulkUpdate?.userErrors ?? [];
   if (updateErrors.length) {
     throw new Error(`Failed to update bundle variant: ${JSON.stringify(updateErrors)}`);
   }
 
+  for (const pkg of input.packages) {
+    await setPackageVariant(pkg.packageId, variantIdByPackageId.get(pkg.packageId)!);
+  }
+
   // Display-only metafield the theme extension's Bundle Contents block renders
   // (numbered component cards on the product page). Uses an open namespace so
-  // block Liquid can read it; checkout truth stays in the variant metafield.
+  // block Liquid can read it; checkout truth stays in each variant's metafield.
   // Soft-fails: a broken storefront card list shouldn't block saving.
   try {
+    const allDisplayItems = input.packages.flatMap((p) => p.displayItems);
     const subtextTemplate = input.widgetSettings.itemSubtextTemplate.trim();
     let subtextByKey: Map<string, string> | null = null;
     if (subtextTemplate) {
       try {
-        subtextByKey = await fetchItemSubtexts(admin, input.displayItems, subtextTemplate);
+        subtextByKey = await fetchItemSubtexts(admin, allDisplayItems, subtextTemplate);
       } catch (error) {
         console.warn("Magyx Bundle: could not resolve item subtext template", error);
       }
     }
 
-    const displayValue = {
-      settings: input.widgetSettings,
-      items: input.displayItems.map((item) => ({
+    const displayItemsOf = (pkg: FixedBundlePackageInput) =>
+      pkg.displayItems.map((item) => ({
         title: item.title,
         imageUrl: item.imageUrl,
         quantity: item.quantity,
@@ -674,8 +703,28 @@ export async function publishFixedBundleProduct(
           item.isGift && !input.widgetSettings.showSubtextOnGifts
             ? null
             : subtextByKey?.get(item.variantId ?? item.productId) || null,
-      })),
-    };
+      }));
+
+    // Single-package bundles keep today's flat shape so the storefront block
+    // (and its own back-compat fallback for pre-package bundles) needs no
+    // changes to render them; multi-package bundles get a `packages` array.
+    const displayValue = isMultiPack
+      ? {
+          settings: input.widgetSettings,
+          packages: input.packages.map((pkg) => ({
+            variantId: variantIdByPackageId.get(pkg.packageId)!,
+            label: pkg.label,
+            badgeText: pkg.badgeText ?? null,
+            badgeTone: pkg.badgeTone ?? null,
+            freeShipping: pkg.freeShipping,
+            items: displayItemsOf(pkg),
+          })),
+        }
+      : {
+          settings: { ...input.widgetSettings, freeShipping: input.packages[0]?.freeShipping ?? false },
+          items: displayItemsOf(input.packages[0]),
+        };
+
     const displayResponse = await admin.graphql(
       `#graphql
       mutation setBundleDisplayMetafield($metafields: [MetafieldsSetInput!]!) {
@@ -709,4 +758,215 @@ export async function publishFixedBundleProduct(
   await publishProductToOnlineStore(admin, productId!);
 
   return productId;
+}
+
+interface ShopifyVariantNode {
+  id: string;
+  selectedOptions: { name: string; value: string }[];
+}
+
+/**
+ * Resolves each package to a Shopify variant id, creating/renaming/removing
+ * "Pack" option values as needed so the product ends up with exactly one
+ * variant per package. Matches packages to existing variants by the
+ * previously-published variant id (not by label, which merchants can rename
+ * freely) so editing a package in place never orphans its variant.
+ */
+async function resolvePackageVariants(
+  admin: AdminApiContext,
+  productId: string,
+  packages: FixedBundlePackageInput[],
+  isMultiPack: boolean,
+): Promise<Map<string, string>> {
+  const fetchProduct = async () => {
+    const response = await admin.graphql(
+      `#graphql
+      query bundleProductVariants($id: ID!) {
+        product(id: $id) {
+          options { id name optionValues { id name } }
+          variants(first: 100) {
+            edges { node { id selectedOptions { name value } } }
+          }
+        }
+      }`,
+      { variables: { id: productId } },
+    );
+    const json = await response.json();
+    const product = json.data?.product;
+    const variants: ShopifyVariantNode[] = (product?.variants?.edges ?? []).map(
+      (e: { node: ShopifyVariantNode }) => e.node,
+    );
+    const packOption: { id: string; optionValues: { id: string; name: string }[] } | undefined = (
+      product?.options ?? []
+    ).find((o: { name: string }) => o.name === PACK_OPTION_NAME);
+    return { variants, packOption };
+  };
+
+  if (!isMultiPack) {
+    const { variants } = await fetchProduct();
+    if (variants.length === 0) throw new Error("Bundle parent product has no variant");
+    // Prefer the package's own previously-published variant so its id (and
+    // the metafield we're about to write to it) survives the edit; fall
+    // back to whichever variant Shopify returns first for a brand-new
+    // product. Any other variants are leftovers from downgrading a
+    // multi-package bundle back to one — safe to remove now that we know
+    // which variant is staying.
+    const preferredId = packages[0].existingVariantId;
+    const keepVariant =
+      (preferredId && variants.find((v) => v.id === preferredId)) || variants[0];
+    const extraVariantIds = variants
+      .filter((v) => v.id !== keepVariant.id)
+      .map((v) => v.id);
+    if (extraVariantIds.length > 0) {
+      const deleteResponse = await admin.graphql(
+        `#graphql
+        mutation deleteBundleVariants($productId: ID!, $variantsIds: [ID!]!) {
+          productVariantsBulkDelete(productId: $productId, variantsIds: $variantsIds) {
+            userErrors { field message }
+          }
+        }`,
+        { variables: { productId, variantsIds: extraVariantIds } },
+      );
+      const deleteErrors =
+        (await deleteResponse.json()).data?.productVariantsBulkDelete?.userErrors ?? [];
+      if (deleteErrors.length) {
+        throw new Error(`Failed to remove old package variants: ${JSON.stringify(deleteErrors)}`);
+      }
+    }
+    return new Map([[packages[0].packageId, keepVariant.id]]);
+  }
+
+  let { variants, packOption } = await fetchProduct();
+
+  // Create/rename/add pack option values FIRST, so replacement variants
+  // always exist before any old ones are removed — deleting first (the
+  // previous approach) could momentarily leave a product with zero variants
+  // when every current package was new (e.g. activating a bundle that was
+  // configured with multiple packages while still in Draft), which Shopify
+  // rejects outright.
+  if (!packOption) {
+    const createOptionResponse = await admin.graphql(
+      `#graphql
+      mutation addPackOption($productId: ID!, $options: [OptionCreateInput!]!) {
+        productOptionsCreate(productId: $productId, options: $options, variantStrategy: CREATE) {
+          userErrors { field message }
+        }
+      }`,
+      {
+        variables: {
+          productId,
+          options: [{ name: PACK_OPTION_NAME, values: packages.map((p) => ({ name: p.label })) }],
+        },
+      },
+    );
+    const createOptionErrors =
+      (await createOptionResponse.json()).data?.productOptionsCreate?.userErrors ?? [];
+    if (createOptionErrors.length) {
+      throw new Error(`Failed to create pack options: ${JSON.stringify(createOptionErrors)}`);
+    }
+  } else {
+    const valueByVariantId = new Map<string, string>();
+    for (const v of variants) {
+      const value = v.selectedOptions.find((o) => o.name === PACK_OPTION_NAME)?.value;
+      if (value) valueByVariantId.set(v.id, value);
+    }
+    const valueIdByName = new Map(packOption.optionValues.map((v) => [v.name, v.id]));
+    const currentLabels = new Set(valueByVariantId.values());
+
+    const optionValuesToUpdate: { id: string; name: string }[] = [];
+    const optionValuesToAdd: { name: string }[] = [];
+    for (const pkg of packages) {
+      const currentValue = pkg.existingVariantId ? valueByVariantId.get(pkg.existingVariantId) : undefined;
+      if (currentValue && currentValue !== pkg.label) {
+        const valueId = valueIdByName.get(currentValue);
+        if (valueId) optionValuesToUpdate.push({ id: valueId, name: pkg.label });
+      } else if (!currentValue && !currentLabels.has(pkg.label)) {
+        // Not tracked by variant id and no existing value already matches
+        // this label (e.g. a product just created with this exact set of
+        // pack labels) — genuinely new, needs a value + variant created.
+        optionValuesToAdd.push({ name: pkg.label });
+      }
+    }
+
+    if (optionValuesToUpdate.length > 0 || optionValuesToAdd.length > 0) {
+      const updateOptionResponse = await admin.graphql(
+        `#graphql
+        mutation updatePackOption(
+          $productId: ID!
+          $option: OptionUpdateInput!
+          $optionValuesToAdd: [OptionValueCreateInput!]
+          $optionValuesToUpdate: [OptionValueUpdateInput!]
+        ) {
+          productOptionUpdate(
+            productId: $productId
+            option: $option
+            optionValuesToAdd: $optionValuesToAdd
+            optionValuesToUpdate: $optionValuesToUpdate
+            variantStrategy: CREATE
+          ) {
+            userErrors { field message }
+          }
+        }`,
+        {
+          variables: {
+            productId,
+            option: { id: packOption.id },
+            optionValuesToAdd: optionValuesToAdd.length > 0 ? optionValuesToAdd : undefined,
+            optionValuesToUpdate:
+              optionValuesToUpdate.length > 0 ? optionValuesToUpdate : undefined,
+          },
+        },
+      );
+      const updateOptionErrors =
+        (await updateOptionResponse.json()).data?.productOptionUpdate?.userErrors ?? [];
+      if (updateOptionErrors.length) {
+        throw new Error(`Failed to update pack options: ${JSON.stringify(updateOptionErrors)}`);
+      }
+    }
+  }
+
+  // Re-fetch: option mutations above may have created/renamed variants
+  ({ variants } = await fetchProduct());
+
+  // Now it's safe to remove variants for packages no longer present — every
+  // current package is guaranteed a matching variant at this point, so the
+  // product always has at least one variant left after this runs.
+  const desiredLabels = new Set(packages.map((p) => p.label));
+  const variantsToDelete = variants.filter((v) => {
+    const value = v.selectedOptions.find((o) => o.name === PACK_OPTION_NAME)?.value;
+    return !value || !desiredLabels.has(value);
+  });
+  if (variantsToDelete.length > 0) {
+    const deleteResponse = await admin.graphql(
+      `#graphql
+      mutation deleteBundleVariants($productId: ID!, $variantsIds: [ID!]!) {
+        productVariantsBulkDelete(productId: $productId, variantsIds: $variantsIds) {
+          userErrors { field message }
+        }
+      }`,
+      { variables: { productId, variantsIds: variantsToDelete.map((v) => v.id) } },
+    );
+    const deleteErrors =
+      (await deleteResponse.json()).data?.productVariantsBulkDelete?.userErrors ?? [];
+    if (deleteErrors.length) {
+      throw new Error(`Failed to remove old package variants: ${JSON.stringify(deleteErrors)}`);
+    }
+    variants = variants.filter((v) => !variantsToDelete.includes(v));
+  }
+
+  const variantByPackValue = new Map<string, string>();
+  for (const v of variants) {
+    const value = v.selectedOptions.find((o) => o.name === PACK_OPTION_NAME)?.value;
+    if (value) variantByPackValue.set(value, v.id);
+  }
+
+  const variantIdByPackageId = new Map<string, string>();
+  for (const pkg of packages) {
+    const variantId = variantByPackValue.get(pkg.label);
+    if (!variantId) {
+      throw new Error(`Could not resolve a Shopify variant for package "${pkg.label}".`);
+    }
+    variantIdByPackageId.set(pkg.packageId, variantId);
+  }
+  return variantIdByPackageId;
 }

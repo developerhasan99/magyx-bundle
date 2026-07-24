@@ -34,6 +34,7 @@ model Bundle {
   // FIXED bundles: waives shipping at checkout when this bundle is bought
   freeShipping    Boolean      @default(false)
   items           BundleItem[]
+  packages        BundlePackage[]
   rule            BundleRule?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -52,6 +53,39 @@ model BundleItem {
   quantity         Int     @default(1)
   isGift           Boolean @default(false)
   position         Int     @default(0)
+}
+
+// FIXED bundles only: alternate purchase options under one bundle listing
+// (e.g. "2 Pack", "3 Pack", "5 Pack"), each with its own item list, gifts,
+// pricing, and free shipping — published as one Shopify product with one
+// variant per package. A bundle with exactly one package behaves exactly
+// like the original single-config FIXED bundle.
+model BundlePackage {
+  id               String              @id @default(cuid())
+  bundleId         String
+  bundle           Bundle              @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  label            String // e.g. "2 Pack"
+  badgeText        String?
+  badgeTone        String? // info | success | attention | warning | critical | new
+  position         Int                 @default(0)
+  pricingType      String              @default("PERCENT_OFF") // FIXED_PRICE | PERCENT_OFF | AMOUNT_OFF
+  pricingValue     Float               @default(0)
+  freeShipping     Boolean             @default(false)
+  shopifyVariantId String?
+  items            BundlePackageItem[]
+}
+
+model BundlePackageItem {
+  id              String        @id @default(cuid())
+  packageId       String
+  package         BundlePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  productId       String // Shopify product GID
+  variantId       String? // Shopify variant GID (null = any variant)
+  productTitle    String
+  productImageUrl String?
+  quantity        Int     @default(1)
+  isGift          Boolean @default(false)
+  position        Int     @default(0)
 }
 
 // Mix & match rules: which products are eligible and the discount tiers
