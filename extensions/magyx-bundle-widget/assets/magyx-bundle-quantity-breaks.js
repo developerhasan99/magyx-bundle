@@ -38,11 +38,57 @@
     });
   }
 
+  // Finds the theme's own add-to-cart form (Dawn and most Dawn-derived
+  // themes render one as form[data-type="add-to-cart-form"]) so the widget
+  // can submit through it instead of its own bypass fetch — this keeps cart
+  // drawer / quick-add / analytics behavior the theme already wires up.
+  function findNativeForm() {
+    return document.querySelector('form[data-type="add-to-cart-form"]');
+  }
+
+  // Quantity inputs are sometimes rendered outside the form and linked via
+  // the HTML `form` attribute (Dawn's quantity-input component does this),
+  // so a plain form.querySelector alone would miss them.
+  function findQuantityInput(form) {
+    if (form.id) {
+      var linked = document.querySelector('[name="quantity"][form="' + form.id + '"]');
+      if (linked) return linked;
+    }
+    return form.querySelector('[name="quantity"]');
+  }
+
+  // Keeps the theme's own form fields pointed at the currently selected
+  // variant/quantity so its native submit button — not a button we render —
+  // is what actually fires Shopify's add-to-cart request and event.
+  function syncNativeFormFields(form, variant, quantity) {
+    var idInput = form.querySelector('[name="id"]');
+    if (!idInput) return false;
+    idInput.value = variant.id;
+    idInput.disabled = false;
+
+    var qtyInput = findQuantityInput(form);
+    if (!qtyInput) {
+      qtyInput = document.createElement("input");
+      qtyInput.type = "hidden";
+      qtyInput.name = "quantity";
+      form.appendChild(qtyInput);
+    }
+    qtyInput.value = quantity;
+    return true;
+  }
+
   function initWidget(root) {
     var productId = root.dataset.productId;
     if (!productId) return;
     var moneyFormat = root.dataset.moneyFormat;
     var stateEl = root.querySelector(".magyx-quantity-breaks__state");
+
+    stateEl.innerHTML =
+      '<div class="magyx-quantity-breaks__skeleton">' +
+      '<div class="magyx-quantity-breaks__skeleton-bar"></div>' +
+      '<div class="magyx-quantity-breaks__skeleton-bar"></div>' +
+      '<div class="magyx-quantity-breaks__skeleton-bar"></div>' +
+      "</div>";
 
     fetch("/apps/magyx-bundle/quantity-breaks/" + encodeURIComponent(productId))
       .then(function (response) {
@@ -79,6 +125,13 @@
       });
       if (selectedTierIndex === -1) selectedTierIndex = 0;
 
+      // When the theme exposes a compatible native add-to-cart form, the
+      // widget never renders its own CTA — it just keeps that form's fields
+      // in sync so the theme's real button is what triggers the add-to-cart
+      // request (and whatever cart drawer / analytics the theme wires to it).
+      var nativeForm = findNativeForm();
+      if (nativeForm && !nativeForm.querySelector('[name="id"]')) nativeForm = null;
+
       var html = "";
       if (data.heading) {
         html += '<p class="magyx-quantity-breaks__heading">' + escapeHtml(data.heading) + "</p>";
@@ -88,7 +141,9 @@
       }
       html += '<div class="magyx-quantity-breaks__tiers" data-qb="tiers"></div>';
       html += '<div class="magyx-quantity-breaks__savings" data-qb="savings" hidden></div>';
-      html += '<button type="button" class="magyx-quantity-breaks__cta" data-qb="cta"></button>';
+      if (!nativeForm) {
+        html += '<button type="button" class="magyx-quantity-breaks__cta" data-qb="cta"></button>';
+      }
       stateEl.innerHTML = html;
 
       function selectedVariant() {
@@ -240,9 +295,21 @@
         var cta = stateEl.querySelector('[data-qb="cta"]');
         var variant = selectedVariant();
         var tier = tiers[selectedTierIndex];
-        cta.disabled = true;
         var originalLabel = cta.textContent;
+        cta.disabled = true;
         cta.textContent = "Adding…";
+
+        var nativeForm = findNativeForm();
+        if (nativeForm && submitNativeForm(nativeForm, variant, tier.quantity)) {
+          // The theme's own product-form handles the request, cart drawer,
+          // and error UI from here — just restore our own button afterward.
+          setTimeout(function () {
+            cta.disabled = false;
+            cta.textContent = originalLabel;
+          }, 1200);
+          return;
+        }
+
         fetch("/cart/add.js", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
