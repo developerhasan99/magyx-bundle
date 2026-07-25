@@ -8,6 +8,11 @@ embedded = true
 [build]
 automatically_update_urls_on_dev = true
 
+[app_proxy]
+url = "https://magyx-bundle-production.up.railway.app/proxy"
+subpath = "magyx-bundle"
+prefix = "apps"
+
 [webhooks]
 api_version = "2026-10"
 
