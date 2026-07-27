@@ -189,7 +189,6 @@
               selectedOptions[option.name] = optionValue.name;
               renderOptions();
               renderTiers();
-              renderCta();
             });
             values.appendChild(button);
           });
@@ -262,7 +261,6 @@
           card.addEventListener("click", function () {
             selectedTierIndex = index;
             renderTiers();
-            renderCta();
           });
           container.appendChild(card);
         });
@@ -277,10 +275,17 @@
         } else {
           savingsEl.hidden = true;
         }
+
+        if (nativeForm) {
+          syncNativeFormFields(nativeForm, variant, tier.quantity);
+        } else {
+          renderCta();
+        }
       }
 
       function renderCta() {
         var cta = stateEl.querySelector('[data-qb="cta"]');
+        if (!cta) return;
         var variant = selectedVariant();
         var tier = tiers[selectedTierIndex];
         var each = tierUnitPrice(variant.price, tier);
@@ -289,7 +294,9 @@
         cta.disabled = !variant.available;
       }
 
-      stateEl.querySelector('[data-qb="cta"]').addEventListener("click", addToCart);
+      if (!nativeForm) {
+        stateEl.querySelector('[data-qb="cta"]').addEventListener("click", addToCart);
+      }
 
       function addToCart() {
         var cta = stateEl.querySelector('[data-qb="cta"]');
@@ -298,17 +305,6 @@
         var originalLabel = cta.textContent;
         cta.disabled = true;
         cta.textContent = "Adding…";
-
-        var nativeForm = findNativeForm();
-        if (nativeForm && submitNativeForm(nativeForm, variant, tier.quantity)) {
-          // The theme's own product-form handles the request, cart drawer,
-          // and error UI from here — just restore our own button afterward.
-          setTimeout(function () {
-            cta.disabled = false;
-            cta.textContent = originalLabel;
-          }, 1200);
-          return;
-        }
 
         fetch("/cart/add.js", {
           method: "POST",
@@ -328,7 +324,6 @@
 
       if (showOptions) renderOptions();
       renderTiers();
-      renderCta();
     }
   }
 
