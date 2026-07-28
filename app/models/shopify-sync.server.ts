@@ -4,6 +4,14 @@ import { getBundles, setBundleProduct, setPackageVariant } from "./bundle.server
 const CONFIG_NAMESPACE = "$app:magyx-bundle";
 const CONFIG_KEY = "config";
 
+// Cap on how many pool products get baked into the Bundle Builder's display
+// metafield as a storefront snapshot. Keeps page weight bounded regardless of
+// pool size (a COLLECTIONS-sourced pool can run to thousands of products) —
+// the live app-proxy fetch remains the source of truth for the full pool,
+// this is only a same-page fallback so the widget still renders/works if
+// that fetch fails.
+const POOL_SNAPSHOT_LIMIT = 60;
+
 /**
  * Publishes all ACTIVE bundles for the shop into an app-owned shop metafield.
  * The Cart Transform function reads this metafield to price mix & match
@@ -165,14 +173,21 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
  * of product GIDs. Used to resolve a QUANTITY_BREAKS bundle's COLLECTIONS
  * scope into the concrete id list the Cart Transform function needs (it has
  * no way to check collection membership dynamically at checkout).
+ *
+ * `limit`, when passed, stops paginating as soon as enough ids are collected
+ * instead of walking the whole collection — used when building the storefront
+ * pool snapshot below, where only a bounded preview is needed. Callers that
+ * need the full membership (Cart Transform validation) omit it.
  */
 export async function resolveCollectionProductIds(
   admin: AdminApiContext,
   collectionIds: string[],
+  limit?: number,
 ): Promise<string[]> {
   if (collectionIds.length === 0) return [];
   const ids = new Set<string>();
   for (const collectionId of collectionIds) {
+    if (limit != null && ids.size >= limit) break;
     let hasNextPage = true;
     let cursor: string | null = null;
     while (hasNextPage) {
@@ -202,6 +217,7 @@ export async function resolveCollectionProductIds(
       for (const edge of products?.edges ?? []) ids.add(edge.node.id);
       hasNextPage = products?.pageInfo?.hasNextPage ?? false;
       cursor = products?.pageInfo?.endCursor ?? null;
+      if (limit != null && ids.size >= limit) break;
     }
   }
   return Array.from(ids);
@@ -631,6 +647,88 @@ export async function fetchItemSubtexts(
     subtextByKey.set(item.variantId ?? item.productId, resolveItemSubtext(template, details));
   }
   return subtextByKey;
+}
+
+export interface ProductPoolItem {
+  productId: string;
+  variantId: string;
+  title: string;
+  image: string | null;
+  price: number;
+  available: boolean;
+  subtext: string | null;
+}
+
+/**
+ * Resolves display data (title/image/price/availability, optionally a
+ * subtext line) for a bounded list of products' first variant. Shared by the
+ * storefront's live slot-builder pool fetch and the publish-time pool
+ * snapshot baked into the display metafield — same shape either way, just a
+ * different (live vs. capped) set of product ids going in.
+ */
+export async function fetchProductPoolItems(
+  admin: AdminApiContext,
+  productIds: string[],
+  subtextTemplate?: string | null,
+): Promise<ProductPoolItem[]> {
+  if (productIds.length === 0) return [];
+
+  const response = await admin.graphql(
+    `#graphql
+    query productPoolItems($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on Product {
+          id
+          title
+          featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
+          variants(first: 1) {
+            edges { node { id title price availableForSale } }
+          }
+        }
+      }
+    }`,
+    { variables: { ids: productIds } },
+  );
+  const json = await response.json();
+
+  const items: ProductPoolItem[] = [];
+  for (const product of json.data?.nodes ?? []) {
+    if (!product) continue;
+    const variant = product.variants?.edges?.[0]?.node;
+    if (!variant) continue;
+    const hasRealVariantTitle = variant.title && variant.title !== "Default Title";
+    items.push({
+      productId: product.id,
+      variantId: variant.id,
+      title: hasRealVariantTitle ? `${product.title} — ${variant.title}` : product.title,
+      image: product.featuredImage?.url ?? null,
+      price: parseFloat(variant.price),
+      available: variant.availableForSale,
+      subtext: null,
+    });
+  }
+
+  // Same "{{sku}}/{{vendor}}/{{metafield:...}}" template the admin sets once
+  // per bundle for the Bundle Contents widget — reused here so pool items
+  // show the same subtext line everywhere. Soft-fails: a broken template
+  // shouldn't blank out the pool.
+  const trimmedTemplate = subtextTemplate?.trim();
+  if (trimmedTemplate) {
+    try {
+      const subtextByKey = await fetchItemSubtexts(
+        admin,
+        items.map((item) => ({ productId: item.productId, variantId: item.variantId })),
+        trimmedTemplate,
+      );
+      for (const item of items) {
+        item.subtext = subtextByKey.get(item.variantId) || null;
+      }
+    } catch (error) {
+      console.warn("Magyx Bundle: could not resolve pool item subtext", error);
+    }
+  }
+
+  return items;
 }
 
 /**
@@ -1129,6 +1227,11 @@ interface SlotBuilderPackageInput {
   // live resolve + bulk price fetch at publish time, so those packages just
   // get no compare-at price, same as the admin editor's own preview.
   poolVariantIds: string[];
+  // Used to resolve the bounded storefront pool snapshot below — PRODUCTS
+  // pools read straight off poolProductIds, COLLECTIONS pools resolve (a
+  // capped number of) collectionIds instead.
+  poolProductIds: string[];
+  collectionIds: string[];
   gifts: { variantId: string; quantity: number }[];
   // Denormalized gift info for the storefront widget's gift display
   giftDisplayItems: {
@@ -1313,11 +1416,15 @@ export async function publishSlotBuilderBundleProduct(
   }
 
   // Display-only metafield the theme's Bundle Builder block reads to find the
-  // bundle id, slot count, package tabs, and appearance settings. Pool
-  // contents are deliberately not baked in here — they're fetched live from
-  // the app proxy instead (same reasoning as the Mix & Match widget), since a
-  // collection-scoped pool can change at any time. Soft-fails: a broken
-  // storefront card list shouldn't block saving.
+  // bundle id, slot count, package tabs, and appearance settings. It also
+  // carries a bounded snapshot (POOL_SNAPSHOT_LIMIT items per package) of
+  // each package's own pool, baked in at publish time — this bundle's
+  // products only, never the merchant's wider catalog/collection — so the
+  // widget can render immediately and keep working even if the storefront's
+  // live app-proxy fetch fails; that fetch remains the source of truth for
+  // the full pool and any price/stock changes since the last publish (a
+  // collection-scoped pool can change without a republish). Soft-fails: a
+  // broken storefront card list shouldn't block saving.
   try {
     const subtextTemplate = input.widgetSettings.itemSubtextTemplate.trim();
     const allGiftDisplayItems = input.packages.flatMap((p) => p.giftDisplayItems);
@@ -1330,10 +1437,28 @@ export async function publishSlotBuilderBundleProduct(
       }
     }
 
+    const poolSnapshotsByPackage = await Promise.all(
+      input.packages.map(async (pkg) => {
+        const productIds =
+          pkg.poolSource === "PRODUCTS"
+            ? Array.from(new Set(pkg.poolProductIds)).slice(0, POOL_SNAPSHOT_LIMIT)
+            : (await resolveCollectionProductIds(admin, pkg.collectionIds, POOL_SNAPSHOT_LIMIT)).slice(
+                0,
+                POOL_SNAPSHOT_LIMIT,
+              );
+        try {
+          return await fetchProductPoolItems(admin, productIds, subtextTemplate);
+        } catch (error) {
+          console.warn("Magyx Bundle: could not resolve pool snapshot for package", pkg.packageId, error);
+          return [];
+        }
+      }),
+    );
+
     const displayValue = {
       bundleId: input.bundleId,
       settings: input.widgetSettings,
-      packages: input.packages.map((pkg) => ({
+      packages: input.packages.map((pkg, index) => ({
         variantId: variantIdByPackageId.get(pkg.packageId)!,
         label: pkg.label,
         badgeText: pkg.badgeText ?? null,
@@ -1341,6 +1466,7 @@ export async function publishSlotBuilderBundleProduct(
         price: pkg.pricingValue,
         slotCount: pkg.slotCount,
         freeShipping: pkg.freeShipping,
+        poolSnapshot: poolSnapshotsByPackage[index],
         gifts: pkg.giftDisplayItems.map((item) => ({
           title: item.title,
           imageUrl: item.imageUrl,

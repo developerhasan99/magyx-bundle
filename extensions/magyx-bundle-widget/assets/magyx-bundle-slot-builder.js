@@ -51,6 +51,24 @@
     );
   }
 
+  // Each package (bottle size / pack size) has its own independent product
+  // pool, keyed by that package's own variant id. Used for both the
+  // publish-time snapshot baked into the page and the live proxy fetch —
+  // same shape, different `itemsKey`.
+  function buildPoolMap(packageEntries, itemsKey) {
+    var map = {};
+    (packageEntries || []).forEach(function (p) {
+      map[numericId(p.variantId)] = p[itemsKey] || [];
+    });
+    return map;
+  }
+
+  function poolHasItems(poolByVariantId, packages) {
+    return packages.some(function (pkg) {
+      return (poolByVariantId[numericId(pkg.variantId)] || []).length > 0;
+    });
+  }
+
   function initWidget(root) {
     var data = readData(root);
     if (!data || !data.bundleId) {
@@ -72,12 +90,24 @@
       return;
     }
 
-    stateEl.innerHTML =
-      '<div class="magyx-slot-builder__skeleton">' +
-      '<div class="magyx-slot-builder__skeleton-bar"></div>' +
-      '<div class="magyx-slot-builder__skeleton-bar"></div>' +
-      '<div class="magyx-slot-builder__skeleton-bar"></div>' +
-      "</div>";
+    // Bundle-scoped snapshot baked in at publish time (a bounded handful of
+    // items per package, not the merchant's whole catalog/collection) lets
+    // the widget render immediately, and keeps it working even if the live
+    // refresh below fails — that fetch is an enhancement for fresher
+    // price/stock/newly-added pool products, not a hard dependency.
+    var poolByVariantId = buildPoolMap(packages, "poolSnapshot");
+    var rendered = false;
+    if (poolHasItems(poolByVariantId, packages)) {
+      render(poolByVariantId);
+      rendered = true;
+    } else {
+      stateEl.innerHTML =
+        '<div class="magyx-slot-builder__skeleton">' +
+        '<div class="magyx-slot-builder__skeleton-bar"></div>' +
+        '<div class="magyx-slot-builder__skeleton-bar"></div>' +
+        '<div class="magyx-slot-builder__skeleton-bar"></div>' +
+        "</div>";
+    }
 
     fetch(
       "/apps/magyx-bundle/slot-builder/" + encodeURIComponent(data.bundleId),
@@ -87,22 +117,34 @@
         return response.json();
       })
       .then(function (pool) {
-        // Each package (bottle size / pack size) has its own independent
-        // pool — keyed by that package's own variant id.
-        var poolByVariantId = {};
-        (pool.packages || []).forEach(function (p) {
-          poolByVariantId[numericId(p.variantId)] = p.items || [];
-        });
-        render(poolByVariantId);
+        var livePoolByVariantId = buildPoolMap(pool.packages, "items");
+        if (rendered) {
+          // Update the same object in place — currentPoolItems()/renderList()
+          // read straight off this reference, so the next modal open or pack
+          // switch picks up the fresh data without disturbing any picks the
+          // shopper already made against the snapshot.
+          for (var key in poolByVariantId) {
+            if (Object.prototype.hasOwnProperty.call(poolByVariantId, key)) {
+              delete poolByVariantId[key];
+            }
+          }
+          for (var liveKey in livePoolByVariantId) {
+            if (Object.prototype.hasOwnProperty.call(livePoolByVariantId, liveKey)) {
+              poolByVariantId[liveKey] = livePoolByVariantId[liveKey];
+            }
+          }
+        } else {
+          render(livePoolByVariantId);
+          rendered = true;
+        }
       })
       .catch(function () {
-        root.remove();
+        // No snapshot and the live fetch failed — nothing to show.
+        if (!rendered) root.remove();
       });
 
     function render(poolByVariantId) {
-      var hasAnyPool = packages.some(function (pkg) {
-        return (poolByVariantId[numericId(pkg.variantId)] || []).length > 0;
-      });
+      var hasAnyPool = poolHasItems(poolByVariantId, packages);
       if (!hasAnyPool) {
         root.remove();
         return;
