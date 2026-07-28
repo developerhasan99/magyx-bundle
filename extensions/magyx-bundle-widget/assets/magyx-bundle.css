@@ -821,3 +821,330 @@
   0% { background-position: 100% 50%; }
   100% { background-position: 0 50%; }
 }
+
+.magyx-slot-builder {
+  --bc-accent: #1a1a1a;
+  --bc-radius: 12px;
+  --bc-border: #e3e3e3;
+  font-size: 15px;
+}
+
+.magyx-slot-builder__heading {
+  font-weight: 600;
+  font-size: 1.05em;
+  margin: 0 0 12px;
+}
+
+.magyx-slot-builder__packs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.magyx-slot-builder__pack-tab {
+  border: 1px solid var(--bc-border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: #fff;
+  font-size: 0.92em;
+  cursor: pointer;
+}
+
+.magyx-slot-builder__pack-tab--active {
+  border-color: var(--bc-accent);
+  color: var(--bc-accent);
+  font-weight: 600;
+}
+
+.magyx-slot-builder__pack-badge {
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 0.85em;
+  margin-left: 4px;
+}
+
+.magyx-slot-builder__pack-badge--success { background: #d4f4dd; color: #0f5c2e; }
+.magyx-slot-builder__pack-badge--info { background: #d7ebfc; color: #0a4a7a; }
+.magyx-slot-builder__pack-badge--attention { background: #ffe9c2; color: #7a4a00; }
+.magyx-slot-builder__pack-badge--warning { background: #fff1c2; color: #6b5200; }
+.magyx-slot-builder__pack-badge--critical { background: #fbdada; color: #7a1010; }
+.magyx-slot-builder__pack-badge--new { background: #e6dcfb; color: #4a2a8a; }
+
+.magyx-slot-builder__progress {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.magyx-slot-builder__progress--complete {
+  color: var(--bc-accent);
+}
+
+.magyx-slot-builder__picks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.magyx-slot-builder__empty {
+  opacity: 0.65;
+  margin: 0;
+  padding: 10px 0;
+}
+
+.magyx-slot-builder__pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--bc-border);
+  border-radius: var(--bc-radius);
+  padding: 8px 10px;
+}
+
+.magyx-slot-builder__pick-image {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #f6f6f6;
+  flex-shrink: 0;
+}
+
+.magyx-slot-builder__pick-title {
+  flex: 1;
+  font-weight: 500;
+}
+
+.magyx-slot-builder__pick-qty {
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+.magyx-slot-builder__pick-remove {
+  border: none;
+  background: transparent;
+  font-size: 1.2em;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 4px;
+}
+
+.magyx-slot-builder__pick-remove:hover {
+  opacity: 1;
+}
+
+.magyx-slot-builder__add-btn {
+  display: block;
+  width: 100%;
+  border: 1px dashed var(--bc-border);
+  border-radius: var(--bc-radius);
+  background: transparent;
+  padding: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+
+.magyx-slot-builder__add-btn:hover {
+  border-color: var(--bc-accent);
+  color: var(--bc-accent);
+}
+
+.magyx-slot-builder__gifts {
+  font-size: 0.9em;
+  opacity: 0.75;
+  margin: 0 0 10px;
+}
+
+.magyx-slot-builder__error {
+  color: #b3261e;
+  font-size: 0.9em;
+  margin: 0 0 10px;
+}
+
+.magyx-slot-builder__cta {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: var(--bc-radius);
+  padding: 14px;
+  background: var(--bc-accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.magyx-slot-builder__cta:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.magyx-slot-builder__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.magyx-slot-builder__skeleton-bar {
+  height: 52px;
+  border-radius: var(--bc-radius);
+  background: linear-gradient(90deg, #f0f0f0 25%, #f7f7f7 37%, #f0f0f0 63%);
+  background-size: 400% 100%;
+  animation: magyx-slot-builder-shimmer 1.4s ease infinite;
+}
+
+@keyframes magyx-slot-builder-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+.magyx-slot-builder-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.magyx-slot-builder-modal__overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.magyx-slot-builder-modal__panel {
+  position: relative;
+  background: #fff;
+  border-radius: var(--bc-radius) var(--bc-radius) 0 0;
+  width: 100%;
+  max-width: 480px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (min-width: 640px) {
+  .magyx-slot-builder-modal {
+    align-items: center;
+  }
+
+  .magyx-slot-builder-modal__panel {
+    border-radius: var(--bc-radius);
+    max-height: 80vh;
+  }
+}
+
+.magyx-slot-builder-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid var(--bc-border);
+}
+
+.magyx-slot-builder-modal__title {
+  font-weight: 700;
+  margin: 0;
+}
+
+.magyx-slot-builder-modal__close {
+  border: none;
+  background: transparent;
+  font-size: 1.4em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.magyx-slot-builder-modal__list {
+  overflow-y: auto;
+  padding: 8px 16px;
+  flex: 1;
+}
+
+.magyx-slot-builder-modal__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--bc-border);
+}
+
+.magyx-slot-builder-modal__item:last-child {
+  border-bottom: none;
+}
+
+.magyx-slot-builder-modal__item-image {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #f6f6f6;
+  flex-shrink: 0;
+}
+
+.magyx-slot-builder-modal__item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.magyx-slot-builder-modal__item-title {
+  font-weight: 500;
+  margin: 0;
+}
+
+.magyx-slot-builder-modal__item-price {
+  opacity: 0.65;
+  font-size: 0.9em;
+  margin: 2px 0 0;
+}
+
+.magyx-slot-builder-modal__stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.magyx-slot-builder-modal__stepper button {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--bc-border);
+  background: #fff;
+  font-size: 1.1em;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.magyx-slot-builder-modal__stepper button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.magyx-slot-builder-modal__qty {
+  min-width: 1.2em;
+  text-align: center;
+  font-weight: 600;
+}
+
+.magyx-slot-builder-modal__footer {
+  padding: 16px;
+  border-top: 1px solid var(--bc-border);
+}
+
+.magyx-slot-builder-modal__done {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: var(--bc-radius);
+  padding: 12px;
+  background: var(--bc-accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}

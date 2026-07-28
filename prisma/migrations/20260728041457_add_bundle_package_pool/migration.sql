@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "BundlePackage" ADD COLUMN     "poolSource" TEXT NOT NULL DEFAULT 'PRODUCTS',
+ADD COLUMN     "slotCount" INTEGER NOT NULL DEFAULT 2,
+ADD COLUMN     "collectionIds" TEXT NOT NULL DEFAULT '[]';

@@ -31,6 +31,45 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
         quantityBreakProductIds = await resolveCollectionProductIds(admin, collectionIds);
       }
 
+      // SLOT_BUILDER: each package has its own pool + slot count, so the
+      // Cart Transform function needs to verify every product a customer
+      // claims to have picked is actually in *that package's* pool before
+      // trusting the selection — otherwise a forged cart line property could
+      // swap in an arbitrary out-of-pool product for the bundle's flat
+      // price. Same resolution as QUANTITY_BREAKS above: PRODUCTS scope is
+      // already a concrete list, COLLECTIONS is flattened into one here (a
+      // product added to a scoped collection won't be eligible until the
+      // next sync).
+      let slotBuilderPackages:
+        | {
+            shopifyVariantId: string | null;
+            freeShipping: boolean;
+            slotCount: number;
+            slotPoolProductIds: string[];
+            gifts: { variantId: string; quantity: number }[];
+          }[]
+        | undefined;
+      if (b.type === "SLOT_BUILDER") {
+        slotBuilderPackages = await Promise.all(
+          b.packages.map(async (p) => {
+            const poolProductIds = p.items.filter((i) => !i.isGift).map((i) => i.productId);
+            const slotPoolProductIds =
+              poolProductIds.length > 0
+                ? poolProductIds
+                : await resolveCollectionProductIds(admin, JSON.parse(p.collectionIds));
+            return {
+              shopifyVariantId: p.shopifyVariantId,
+              freeShipping: p.freeShipping,
+              slotCount: p.slotCount,
+              slotPoolProductIds,
+              gifts: p.items
+                .filter((i): i is typeof i & { variantId: string } => i.isGift && Boolean(i.variantId))
+                .map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
+            };
+          }),
+        );
+      }
+
       return {
         id: b.id,
         type: b.type,
@@ -45,6 +84,13 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
         quantityBreakScope: b.type === "QUANTITY_BREAKS" ? b.quantityBreakScope : undefined,
         // ALL scope needs no list — every product matches
         quantityBreakProductIds,
+        // SLOT_BUILDER packages (bottle size / pack size), each keyed by its
+        // own Shopify variant id so the Cart Transform function can find the
+        // right pool/slot count/free-shipping flag/gift list for whichever
+        // package the customer bought. FIXED bundles don't need this — their
+        // per-variant checkout truth already lives in that variant's own
+        // `$app:magyx-bundle/components` metafield.
+        packages: slotBuilderPackages,
         tiers:
           b.type === "QUANTITY_BREAKS"
             ? b.tiers.map((t) => ({
@@ -120,7 +166,7 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
  * scope into the concrete id list the Cart Transform function needs (it has
  * no way to check collection membership dynamically at checkout).
  */
-async function resolveCollectionProductIds(
+export async function resolveCollectionProductIds(
   admin: AdminApiContext,
   collectionIds: string[],
 ): Promise<string[]> {
@@ -847,6 +893,15 @@ interface ShopifyVariantNode {
   selectedOptions: { name: string; value: string }[];
 }
 
+// The subset of a package FIXED and SLOT_BUILDER both need for variant
+// resolution — everything else (pricing, components, gifts) is type-specific
+// and handled by each publish function on its own.
+interface PackageVariantIdentity {
+  packageId: string;
+  existingVariantId?: string | null;
+  label: string;
+}
+
 /**
  * Resolves each package to a Shopify variant id, creating/renaming/removing
  * "Pack" option values as needed so the product ends up with exactly one
@@ -857,7 +912,7 @@ interface ShopifyVariantNode {
 async function resolvePackageVariants(
   admin: AdminApiContext,
   productId: string,
-  packages: FixedBundlePackageInput[],
+  packages: PackageVariantIdentity[],
   isMultiPack: boolean,
 ): Promise<Map<string, string>> {
   const fetchProduct = async () => {
@@ -1051,4 +1106,282 @@ async function resolvePackageVariants(
     variantIdByPackageId.set(pkg.packageId, variantId);
   }
   return variantIdByPackageId;
+}
+
+// One purchase option under a Bundle Builder bundle (e.g. "50ml" / "100ml").
+// Unlike a FIXED package, there are no paid components to snapshot — the
+// customer's slot picks aren't known until checkout — so a package carries
+// its own price, slot count, product pool, and whatever fixed free gifts
+// ship alongside it. Each package's pool is independent of the others.
+interface SlotBuilderPackageInput {
+  packageId: string;
+  existingVariantId?: string | null;
+  label: string;
+  badgeText?: string | null;
+  badgeTone?: string | null;
+  pricingValue: number; // always FIXED_PRICE
+  freeShipping: boolean;
+  poolSource: string; // PRODUCTS | COLLECTIONS
+  slotCount: number;
+  // PRODUCTS-sourced pool variant ids, used only to compute this package's
+  // compare-at price (average pool item price × slot count). Empty when
+  // COLLECTIONS-sourced — averaging over a whole collection isn't worth a
+  // live resolve + bulk price fetch at publish time, so those packages just
+  // get no compare-at price, same as the admin editor's own preview.
+  poolVariantIds: string[];
+  gifts: { variantId: string; quantity: number }[];
+  // Denormalized gift info for the storefront widget's gift display
+  giftDisplayItems: {
+    title: string;
+    imageUrl: string | null;
+    quantity: number;
+    productId: string;
+    variantId: string | null;
+  }[];
+}
+
+interface SlotBuilderPublishInput {
+  bundleId: string;
+  title: string;
+  description?: string | null;
+  packages: SlotBuilderPackageInput[];
+  widgetSettings: {
+    heading: string;
+    accentColor: string;
+    showPrices: boolean;
+    itemSubtextTemplate: string;
+    showSubtextOnGifts: boolean;
+  };
+}
+
+/**
+ * Publishes/updates a SLOT_BUILDER bundle's parent Shopify product — one
+ * variant per package (bottle size, pack size, ...), each priced at that
+ * package's flat price (plus an optional compare-at price averaged from its
+ * own PRODUCTS-sourced pool). No components are baked in: the customer's
+ * slot picks are supplied by the storefront at add-to-cart time and
+ * validated against that package's own pool by the Cart Transform function
+ * (see syncBundleConfigMetafield's per-package `slotPoolProductIds`), not by
+ * anything set here.
+ */
+export async function publishSlotBuilderBundleProduct(
+  admin: AdminApiContext,
+  input: SlotBuilderPublishInput,
+  existingProductId?: string | null,
+) {
+  const isMultiPack = input.packages.length > 1;
+
+  // Gift variants must still resolve — a broken gift would silently ship an
+  // empty freebie at checkout — so a missing one hard-fails the publish, same
+  // as FIXED's component snapshot. Pool variants are only looked up for the
+  // compare-at average below; a deleted pool product just drops out of that
+  // average rather than blocking the save (the storefront proxy route
+  // already filters unresolvable pool items out at request time).
+  const allGiftVariantIds = Array.from(
+    new Set(input.packages.flatMap((p) => p.gifts.map((g) => g.variantId))),
+  );
+  const allPoolVariantIds = Array.from(new Set(input.packages.flatMap((p) => p.poolVariantIds)));
+  const allPriceLookupIds = Array.from(new Set([...allGiftVariantIds, ...allPoolVariantIds]));
+  let priceByVariant = new Map<string, number>();
+  if (allPriceLookupIds.length > 0) {
+    const priceResponse = await admin.graphql(
+      `#graphql
+      query slotBuilderVariantPrices($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          ... on ProductVariant { id price }
+        }
+      }`,
+      { variables: { ids: allPriceLookupIds } },
+    );
+    const priceJson = await priceResponse.json();
+    priceByVariant = new Map<string, number>(
+      (priceJson.data?.nodes ?? [])
+        .filter(Boolean)
+        .map((n: { id: string; price: string }) => [n.id, parseFloat(n.price)]),
+    );
+    const missingGiftVariantIds = allGiftVariantIds.filter((id) => !priceByVariant.has(id));
+    if (missingGiftVariantIds.length > 0) {
+      const missingIds = new Set(missingGiftVariantIds);
+      const missingTitles = new Set(
+        input.packages
+          .flatMap((p) => p.giftDisplayItems)
+          .filter((i) => i.variantId && missingIds.has(i.variantId))
+          .map((i) => `"${i.title}"`),
+      );
+      throw new Error(
+        `${Array.from(missingTitles).join(", ") || "Some free gift products"} no longer exist in your store. Remove them from the bundle and save again.`,
+      );
+    }
+  }
+
+  let productId = existingProductId ?? null;
+
+  if (!productId) {
+    const createResponse = await admin.graphql(
+      `#graphql
+      mutation createSlotBuilderProduct($product: ProductCreateInput!) {
+        productCreate(product: $product) {
+          product { id }
+          userErrors { field message }
+        }
+      }`,
+      {
+        variables: {
+          product: {
+            title: input.title,
+            descriptionHtml: input.description ?? "",
+            tags: ["magyx-bundle"],
+            status: "ACTIVE",
+            ...(isMultiPack
+              ? {
+                  productOptions: [
+                    {
+                      name: PACK_OPTION_NAME,
+                      values: input.packages.map((p) => ({ name: p.label })),
+                    },
+                  ],
+                }
+              : {}),
+          },
+        },
+      },
+    );
+    const createJson = await createResponse.json();
+    const createErrors = createJson.data?.productCreate?.userErrors ?? [];
+    if (createErrors.length) {
+      throw new Error(`Failed to create bundle product: ${JSON.stringify(createErrors)}`);
+    }
+    productId = createJson.data.productCreate.product.id;
+    await setBundleProduct(input.bundleId, productId!);
+  }
+
+  const variantIdByPackageId = await resolvePackageVariants(
+    admin,
+    productId!,
+    input.packages.map((p) => ({
+      packageId: p.packageId,
+      existingVariantId: p.existingVariantId,
+      label: p.label,
+    })),
+    isMultiPack,
+  );
+
+  // Mirrors the admin editor's own preview math exactly: average price of
+  // this package's (PRODUCTS-sourced) pool items, times its slot count.
+  const combinedPriceByPackageId = new Map<string, number>();
+  for (const pkg of input.packages) {
+    if (pkg.poolSource !== "PRODUCTS") continue;
+    const pricedPoolItems = pkg.poolVariantIds
+      .map((id) => priceByVariant.get(id))
+      .filter((price): price is number => price != null);
+    if (pricedPoolItems.length === 0) continue;
+    const average = pricedPoolItems.reduce((sum, price) => sum + price, 0) / pricedPoolItems.length;
+    combinedPriceByPackageId.set(
+      pkg.packageId,
+      Math.round(average * pkg.slotCount * 100) / 100,
+    );
+  }
+
+  const variantUpdates = input.packages.map((pkg) => {
+    const combinedPrice = combinedPriceByPackageId.get(pkg.packageId) ?? 0;
+    return {
+      id: variantIdByPackageId.get(pkg.packageId)!,
+      price: pkg.pricingValue.toFixed(2),
+      // Cleared when there's no actual saving so themes don't show "$X $X"
+      compareAtPrice: combinedPrice > pkg.pricingValue ? combinedPrice.toFixed(2) : null,
+    };
+  });
+
+  const updateResponse = await admin.graphql(
+    `#graphql
+    mutation updateSlotBuilderVariants($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+        productVariants { id }
+        userErrors { field message }
+      }
+    }`,
+    { variables: { productId, variants: variantUpdates } },
+  );
+  const updateJson = await updateResponse.json();
+  const updateErrors = updateJson.data?.productVariantsBulkUpdate?.userErrors ?? [];
+  if (updateErrors.length) {
+    throw new Error(`Failed to update bundle variant: ${JSON.stringify(updateErrors)}`);
+  }
+
+  for (const pkg of input.packages) {
+    await setPackageVariant(pkg.packageId, variantIdByPackageId.get(pkg.packageId)!);
+  }
+
+  // Display-only metafield the theme's Bundle Builder block reads to find the
+  // bundle id, slot count, package tabs, and appearance settings. Pool
+  // contents are deliberately not baked in here — they're fetched live from
+  // the app proxy instead (same reasoning as the Mix & Match widget), since a
+  // collection-scoped pool can change at any time. Soft-fails: a broken
+  // storefront card list shouldn't block saving.
+  try {
+    const subtextTemplate = input.widgetSettings.itemSubtextTemplate.trim();
+    const allGiftDisplayItems = input.packages.flatMap((p) => p.giftDisplayItems);
+    let subtextByKey: Map<string, string> | null = null;
+    if (subtextTemplate && input.widgetSettings.showSubtextOnGifts && allGiftDisplayItems.length > 0) {
+      try {
+        subtextByKey = await fetchItemSubtexts(admin, allGiftDisplayItems, subtextTemplate);
+      } catch (error) {
+        console.warn("Magyx Bundle: could not resolve item subtext template", error);
+      }
+    }
+
+    const displayValue = {
+      bundleId: input.bundleId,
+      settings: input.widgetSettings,
+      packages: input.packages.map((pkg) => ({
+        variantId: variantIdByPackageId.get(pkg.packageId)!,
+        label: pkg.label,
+        badgeText: pkg.badgeText ?? null,
+        badgeTone: pkg.badgeTone ?? null,
+        price: pkg.pricingValue,
+        slotCount: pkg.slotCount,
+        freeShipping: pkg.freeShipping,
+        gifts: pkg.giftDisplayItems.map((item) => ({
+          title: item.title,
+          imageUrl: item.imageUrl,
+          quantity: item.quantity,
+          price: item.variantId ? (priceByVariant.get(item.variantId) ?? null) : null,
+          subtext: subtextByKey?.get(item.variantId ?? item.productId) || null,
+        })),
+      })),
+    };
+
+    const displayResponse = await admin.graphql(
+      `#graphql
+      mutation setSlotBuilderDisplayMetafield($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          userErrors { field message }
+        }
+      }`,
+      {
+        variables: {
+          metafields: [
+            {
+              ownerId: productId,
+              namespace: "magyx_bundle",
+              key: "slot_builder",
+              type: "json",
+              value: JSON.stringify(displayValue),
+            },
+          ],
+        },
+      },
+    );
+    const displayErrors =
+      (await displayResponse.json()).data?.metafieldsSet?.userErrors ?? [];
+    if (displayErrors.length) {
+      console.warn("Magyx Bundle: slot builder display metafield errors", displayErrors);
+    }
+  } catch (error) {
+    console.warn("Magyx Bundle: could not set slot builder display metafield", error);
+  }
+
+  await publishProductToOnlineStore(admin, productId!);
+
+  return productId;
 }

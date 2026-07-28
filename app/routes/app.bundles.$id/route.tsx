@@ -28,6 +28,7 @@ import {
 } from "../../models/bundle.server";
 import {
   publishFixedBundleProduct,
+  publishSlotBuilderBundleProduct,
   syncBundleConfigMetafield,
 } from "../../models/shopify-sync.server";
 import {
@@ -143,12 +144,21 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     }
   }
 
-  // Resolve collection GIDs from the rule into titles/images for the editor UI
-  let collections: { id: string; title: string; imageUrl: string | null }[] = [];
+  // Resolve collection GIDs into titles/images for the editor UI — from the
+  // bundle-wide rule (MIX_MATCH/QUANTITY_BREAKS pool) and, for SLOT_BUILDER,
+  // each package's own pool too. Batched into one query across every source
+  // instead of one per package.
   const collectionIds: string[] = bundle.rule
     ? (JSON.parse(bundle.rule.collectionIds) as string[])
     : [];
-  if (collectionIds.length > 0) {
+  const packageCollectionIds: string[][] = bundle.packages.map((p) =>
+    bundle.type === "SLOT_BUILDER" ? (JSON.parse(p.collectionIds) as string[]) : [],
+  );
+  const allCollectionIds = Array.from(
+    new Set([collectionIds, ...packageCollectionIds].flat()),
+  );
+  const collectionById = new Map<string, CollectionState>();
+  if (allCollectionIds.length > 0) {
     try {
       const response = await admin.graphql(
         `#graphql
@@ -161,25 +171,32 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
             }
           }
         }`,
-        { variables: { ids: collectionIds } },
+        { variables: { ids: allCollectionIds } },
       );
-      collections = ((await response.json()).data?.nodes ?? [])
-        .filter(Boolean)
-        .map((node: { id: string; title: string; image?: { url: string } | null }) => ({
-          id: node.id,
-          title: node.title,
-          imageUrl: node.image?.url ?? null,
-        }));
+      for (const node of (await response.json()).data?.nodes ?? []) {
+        if (node) {
+          collectionById.set(node.id, {
+            id: node.id,
+            title: node.title,
+            imageUrl: node.image?.url ?? null,
+          });
+        }
+      }
     } catch (error) {
       console.warn("Magyx Bundle: could not load bundle collections", error);
-      // Keep the IDs so a failed lookup doesn't wipe selections on next save
-      collections = collectionIds.map((id) => ({
-        id,
-        title: `Collection ${id.split("/").pop()}`,
-        imageUrl: null,
-      }));
     }
   }
+  // Keep the IDs so a failed/partial lookup doesn't wipe selections on next save
+  const resolveCollections = (ids: string[]): CollectionState[] =>
+    ids.map(
+      (id) =>
+        collectionById.get(id) ?? {
+          id,
+          title: `Collection ${id.split("/").pop()}`,
+          imageUrl: null,
+        },
+    );
+  const collections = resolveCollections(collectionIds);
 
   return {
     shopifyProduct,
@@ -212,7 +229,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         missing:
           pricesLoaded && Boolean(i.variantId) && !priceByVariant.has(i.variantId!),
       })),
-      packages: bundle.packages.map((p) => ({
+      packages: bundle.packages.map((p, index) => ({
         id: p.id,
         label: p.label,
         badgeText: p.badgeText,
@@ -221,6 +238,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         pricingValue: p.pricingValue,
         freeShipping: p.freeShipping,
         shopifyVariantId: p.shopifyVariantId,
+        poolSource: p.poolSource,
+        slotCount: p.slotCount,
+        collections: resolveCollections(packageCollectionIds[index]),
         items: p.items.map((i) => ({
           productId: i.productId,
           variantId: i.variantId,
@@ -299,6 +319,19 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       if (pkg.pricingType === "PERCENT_OFF" && pkg.pricingValue > 100)
         errors.push(`"${label}" discount can't be more than 100%.`);
     });
+  } else if (payload.type === "SLOT_BUILDER") {
+    // Each package has its own pool + slot count now, not the bundle overall.
+    if (payload.packages.length === 0) errors.push("Add at least one package.");
+    payload.packages.forEach((pkg, i) => {
+      const label = pkg.label?.trim() || `Package ${i + 1}`;
+      if (!pkg.label?.trim()) errors.push(`Package ${i + 1} needs a title.`);
+      if (pkg.pricingValue < 0) errors.push(`"${label}" pricing value can't be negative.`);
+      const pkgHasPool =
+        pkg.items.some((item) => !item.isGift) || (pkg.collectionIds?.length ?? 0) > 0;
+      if (!pkgHasPool)
+        errors.push(`"${label}" needs products or a collection for customers to pick from.`);
+      if ((pkg.slotCount ?? 0) < 2) errors.push(`"${label}" needs at least two slots.`);
+    });
   } else if (payload.type === "QUANTITY_BREAKS") {
     if (payload.quantityBreakScope === "PRODUCTS" && payload.items.length === 0)
       errors.push("Select at least one product this applies to.");
@@ -327,8 +360,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     errors.push("Add at least one discount tier.");
   if (payload.rule?.discountTiers?.some((t) => t.discount > 100))
     errors.push("Tier discounts can't be more than 100%.");
-  if (payload.type === "SLOT_BUILDER" && (payload.rule?.minItems ?? 0) < 2)
-    errors.push("Bundle builder needs at least two slots.");
   if (errors.length) return { errors };
 
   const input: BundleInput = {
@@ -336,6 +367,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     items: payload.items.map((item, position) => ({ ...item, position })),
     packages: payload.packages.map((pkg, position) => ({
       ...pkg,
+      // Bundle builder is fixed-price only — a customer's slot picks aren't
+      // known until checkout, so there's no trustworthy "combined price" to
+      // discount off of. Enforced here too (not just hidden in the UI) so a
+      // tampered payload can't sneak a different pricing type into the DB.
+      pricingType: payload.type === "SLOT_BUILDER" ? "FIXED_PRICE" : pkg.pricingType,
       position,
       items: pkg.items.map((item, itemPosition) => ({ ...item, position: itemPosition })),
     })),
@@ -346,7 +382,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     })),
     // QUANTITY_BREAKS only sends a rule when scoped to collections (see
     // save()'s payload construction) — falls through to payload.rule as-is.
-    rule: payload.type === "FIXED" ? null : payload.rule,
+    // SLOT_BUILDER's pool/slot count now live per package instead of a
+    // bundle-level rule (same as FIXED, which never had one).
+    rule: payload.type === "FIXED" || payload.type === "SLOT_BUILDER" ? null : payload.rule,
   };
 
   const bundle =
@@ -391,6 +429,64 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
               variantId: i.variantId,
               isGift: i.isGift,
             })),
+          })),
+        },
+        bundle.shopifyProductId,
+      );
+    } catch (error) {
+      return {
+        errors: [
+          `Bundle saved, but publishing the product failed: ${
+            error instanceof Error ? error.message : "unknown error"
+          }`,
+        ],
+      };
+    }
+  }
+
+  // Publishing a bundle builder bundle creates/updates its parent product,
+  // same as FIXED — the difference is there are no paid components to
+  // snapshot (the customer's slot picks aren't known until checkout).
+  if (bundle.type === "SLOT_BUILDER" && bundle.status === "ACTIVE") {
+    try {
+      await publishSlotBuilderBundleProduct(
+        admin,
+        {
+          bundleId: bundle.id,
+          title: bundle.title,
+          description: bundle.description,
+          widgetSettings: {
+            heading: bundle.widgetHeading,
+            accentColor: bundle.accentColor,
+            showPrices: bundle.showPrices,
+            itemSubtextTemplate: bundle.itemSubtextTemplate,
+            showSubtextOnGifts: bundle.showSubtextOnGifts,
+          },
+          packages: bundle.packages.map((pkg) => ({
+            packageId: pkg.id,
+            existingVariantId: pkg.shopifyVariantId,
+            label: pkg.label,
+            badgeText: pkg.badgeText,
+            badgeTone: pkg.badgeTone,
+            pricingValue: pkg.pricingValue,
+            freeShipping: pkg.freeShipping,
+            poolSource: pkg.poolSource,
+            slotCount: pkg.slotCount,
+            poolVariantIds: pkg.items
+              .filter((i) => !i.isGift && i.variantId)
+              .map((i) => i.variantId!),
+            gifts: pkg.items
+              .filter((i) => i.isGift && i.variantId)
+              .map((i) => ({ variantId: i.variantId!, quantity: i.quantity })),
+            giftDisplayItems: pkg.items
+              .filter((i) => i.isGift)
+              .map((i) => ({
+                title: i.productTitle,
+                imageUrl: i.productImageUrl,
+                quantity: i.quantity,
+                productId: i.productId,
+                variantId: i.variantId,
+              })),
           })),
         },
         bundle.shopifyProductId,
@@ -456,6 +552,9 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
               pricingType: p.pricingType,
               pricingValue: String(p.pricingValue),
               freeShipping: p.freeShipping,
+              poolSource: p.poolSource ?? "PRODUCTS",
+              collections: (p.collections ?? []) as CollectionState[],
+              slotCount: String(p.slotCount ?? 2),
               items: p.items.map(
                 (i): ItemState => ({
                   productId: i.productId,
@@ -481,7 +580,6 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
         : (bundle?.collections?.length ?? 0) > 0
           ? "COLLECTIONS"
           : "PRODUCTS",
-    slotCount: String((bundle?.type === "SLOT_BUILDER" && bundle?.rule?.minItems) || 3),
     minItems: String((bundle?.type === "MIX_MATCH" && bundle?.rule?.minItems) || 2),
     maxItems: bundle?.rule?.maxItems ? String(bundle.rule.maxItems) : "",
     tiers:
@@ -560,7 +658,6 @@ export default function BundleBuilder() {
     initialForm.collections,
   );
   const [poolSource, setPoolSource] = useState<string>(initialForm.poolSource);
-  const [slotCount, setSlotCount] = useState(initialForm.slotCount);
   const [minItems, setMinItems] = useState(initialForm.minItems);
   const [maxItems, setMaxItems] = useState(initialForm.maxItems);
   const [tiers, setTiers] = useState<TierState[]>(initialForm.tiers);
@@ -593,17 +690,24 @@ export default function BundleBuilder() {
   // FIXED bundles source their item list/pricing from the active package;
   // every other type keeps using the flat top-level state exactly as before
   const activeItems = useMemo(
-    () => (type === "FIXED" ? (packages[activePackageIndex]?.items ?? []) : items),
+    () =>
+      type === "FIXED" || type === "SLOT_BUILDER"
+        ? (packages[activePackageIndex]?.items ?? [])
+        : items,
     [type, packages, activePackageIndex, items],
   );
   const activePricingType =
-    type === "FIXED" ? (packages[activePackageIndex]?.pricingType ?? "FIXED_PRICE") : pricingType;
+    type === "FIXED" || type === "SLOT_BUILDER"
+      ? (packages[activePackageIndex]?.pricingType ?? "FIXED_PRICE")
+      : pricingType;
   const activePricingValue =
-    type === "FIXED" ? (packages[activePackageIndex]?.pricingValue ?? "") : pricingValue;
+    type === "FIXED" || type === "SLOT_BUILDER"
+      ? (packages[activePackageIndex]?.pricingValue ?? "")
+      : pricingValue;
 
   const setActiveItems = useCallback(
     (updater: (current: ItemState[]) => ItemState[]) => {
-      if (type === "FIXED") {
+      if (type === "FIXED" || type === "SLOT_BUILDER") {
         setPackages((current) =>
           current.map((pkg, i) =>
             i === activePackageIndex ? { ...pkg, items: updater(pkg.items) } : pkg,
@@ -625,6 +729,36 @@ export default function BundleBuilder() {
     [activePackageIndex],
   );
 
+  // SLOT_BUILDER only: each package has its own product pool + slot count
+  // (a "30ml" package can offer a different pool/slot count than "100ml"),
+  // so poolSource/collections read/write the active package instead of the
+  // bundle-wide state every other pool type (MIX_MATCH/QUANTITY_BREAKS) uses.
+  const activePoolSource =
+    type === "SLOT_BUILDER" ? (packages[activePackageIndex]?.poolSource ?? "PRODUCTS") : poolSource;
+  const activeCollections =
+    type === "SLOT_BUILDER" ? (packages[activePackageIndex]?.collections ?? []) : collections;
+  const setActivePoolSource = useCallback(
+    (value: string) => {
+      if (type === "SLOT_BUILDER") updateActivePackage({ poolSource: value });
+      else setPoolSource(value);
+    },
+    [type, updateActivePackage],
+  );
+  const setActiveCollections = useCallback(
+    (updater: (current: CollectionState[]) => CollectionState[]) => {
+      if (type === "SLOT_BUILDER") {
+        setPackages((current) =>
+          current.map((pkg, i) =>
+            i === activePackageIndex ? { ...pkg, collections: updater(pkg.collections) } : pkg,
+          ),
+        );
+      } else {
+        setCollections(updater);
+      }
+    },
+    [type, activePackageIndex],
+  );
+
   const addPackage = useCallback(() => {
     setPackages((current) => [
       ...current,
@@ -636,8 +770,11 @@ export default function BundleBuilder() {
     setPackages((current) => current.filter((_, i) => i !== activePackageIndex));
   }, [activePackageIndex]);
 
-  // Gifts only apply to FIXED bundles; paidItems/giftItems split the active
-  // items list for rendering and price math without mutating storage shape
+  // paidItems/giftItems split the active items list for rendering and price
+  // math without mutating storage shape. FIXED and SLOT_BUILDER both keep
+  // paid + gift items in one package-scoped list (SLOT_BUILDER's "paid"
+  // items are its product pool, not fixed contents); every other type keeps
+  // using the flat top-level `items` list, which never carries gifts.
   const paidItems = useMemo(() => activeItems.filter((i) => !i.isGift), [activeItems]);
   const giftItems = useMemo(() => activeItems.filter((i) => i.isGift), [activeItems]);
 
@@ -648,13 +785,13 @@ export default function BundleBuilder() {
       JSON.stringify({
         title, type, status, pricingType, pricingValue, widgetStyle,
         widgetHeading, accentColor, showPrices, itemSubtextTemplate,
-        showSubtextOnGifts, freeShipping, items, packages, collections, poolSource, slotCount,
+        showSubtextOnGifts, freeShipping, items, packages, collections, poolSource,
         minItems, maxItems, tiers, qbTiers,
       }) !== JSON.stringify(initialForm),
     [
       initialForm, title, type, status, pricingType, pricingValue,
       widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
-      showSubtextOnGifts, freeShipping, items, packages, collections, poolSource, slotCount,
+      showSubtextOnGifts, freeShipping, items, packages, collections, poolSource,
       minItems, maxItems, tiers, qbTiers,
     ],
   );
@@ -684,7 +821,6 @@ export default function BundleBuilder() {
       if (resetActiveTabs) setActivePackageIndex(0);
       setCollections(form.collections);
       setPoolSource(form.poolSource);
-      setSlotCount(form.slotCount);
       setMinItems(form.minItems);
       setMaxItems(form.maxItems);
       setTiers(form.tiers);
@@ -738,10 +874,14 @@ export default function BundleBuilder() {
     // line item. Pool types stay product-level. Scoped to the matching
     // group (paid vs. gift) so picking gifts doesn't preselect/overwrite
     // the paid component list, and vice versa.
+    // SLOT_BUILDER gifts are variant-level too (same as FIXED); its pool add
+    // stays product-level like MIX_MATCH/QUANTITY_BREAKS (a slot is filled
+    // by whichever variant the customer picks at checkout, not pinned by the
+    // merchant here) — both read/write activeItems exactly like FIXED does.
+    const useVariantPicker = type === "FIXED" || (type === "SLOT_BUILDER" && isGiftFlag);
     const groupItems = activeItems.filter((i) => i.isGift === isGiftFlag);
-    const selectionIds =
-      type === "FIXED"
-        ? Array.from(
+    const selectionIds = useVariantPicker
+      ? Array.from(
             groupItems.reduce((byProduct, item) => {
               if (item.variantId) {
                 const entry = byProduct.get(item.productId) ?? {
@@ -776,7 +916,7 @@ export default function BundleBuilder() {
       return Number.isNaN(price) ? null : price;
     };
 
-    if (type === "FIXED") {
+    if (useVariantPicker) {
       setActiveItems((current) => {
         // Scoped to the same group so an existing paid item isn't reused
         // (with the wrong isGift flag) when adding to the gift group, or
@@ -817,9 +957,15 @@ export default function BundleBuilder() {
       return;
     }
 
-    setItems((current) => {
-      const byProduct = new Map(current.map((i) => [i.productId, i]));
-      return selection.map(
+    // Product-level pool add: MIX_MATCH/QUANTITY_BREAKS write the bundle-wide
+    // `items` list; SLOT_BUILDER writes into the active package's list
+    // instead (via setActiveItems), scoped past its gift entries so re-adding
+    // a product already picked as a gift doesn't reuse/overwrite that row.
+    const setter = type === "SLOT_BUILDER" ? setActiveItems : setItems;
+    setter((current) => {
+      const relevant = type === "SLOT_BUILDER" ? current.filter((i) => !i.isGift) : current;
+      const byProduct = new Map(relevant.map((i) => [i.productId, i]));
+      const newItems = selection.map(
         (product: any) =>
           byProduct.get(product.id) ?? {
             productId: product.id,
@@ -835,6 +981,7 @@ export default function BundleBuilder() {
             missing: false,
           },
       );
+      return type === "SLOT_BUILDER" ? [...current.filter((i) => i.isGift), ...newItems] : newItems;
     });
   }, [shopify, activeItems, type, setActiveItems]);
 
@@ -843,17 +990,17 @@ export default function BundleBuilder() {
       type: "collection",
       multiple: true,
       action: "add",
-      selectionIds: collections.map((c) => ({ id: c.id })),
+      selectionIds: activeCollections.map((c) => ({ id: c.id })),
     });
     if (!selection) return;
-    setCollections(
+    setActiveCollections(() =>
       selection.map((collection: any) => ({
         id: collection.id,
         title: collection.title,
         imageUrl: collection.image?.originalSrc ?? null,
       })),
     );
-  }, [shopify, collections]);
+  }, [shopify, activeCollections, setActiveCollections]);
 
   const addQbTier = useCallback(() => {
     setQbTiers((current) => [
@@ -975,11 +1122,12 @@ export default function BundleBuilder() {
   }, [shopify, bundle]);
 
   const save = useCallback(() => {
-    const usesCollections = type !== "FIXED" && poolSource === "COLLECTIONS";
+    // SLOT_BUILDER's pool lives per-package now, not at the bundle level —
+    // its own collectionIds/items are resolved per package below instead.
+    const usesCollections = type !== "FIXED" && type !== "SLOT_BUILDER" && poolSource === "COLLECTIONS";
     // QUANTITY_BREAKS only — every other type only ever has PRODUCTS/COLLECTIONS
     const usesAllProducts = type === "QUANTITY_BREAKS" && poolSource === "ALL";
     const collectionIds = usesCollections ? collections.map((c) => c.id) : [];
-    const slots = parseInt(slotCount, 10) || 0;
     const payload = {
       title,
       description,
@@ -997,7 +1145,7 @@ export default function BundleBuilder() {
       quantityBreakScope: poolSource,
       // price/missing are editor-only display state — the DB schema doesn't store them
       items:
-        type === "FIXED" || usesCollections || usesAllProducts
+        type === "FIXED" || type === "SLOT_BUILDER" || usesCollections || usesAllProducts
           ? []
           : items.map(({ price: _price, missing: _missing, ...item }) => item),
       tiers:
@@ -1023,19 +1171,34 @@ export default function BundleBuilder() {
             }))
           : [],
       packages:
-        type === "FIXED"
-          ? packages.map((pkg, position) => ({
-              id: pkg.id,
-              label: pkg.label,
-              badgeText: pkg.badgeText.trim() || null,
-              badgeTone: pkg.badgeTone || null,
-              position,
-              pricingType: pkg.pricingType,
-              pricingValue: parseFloat(pkg.pricingValue) || 0,
-              freeShipping: pkg.freeShipping,
-              items: pkg.items.map(({ price: _price, missing: _missing, ...item }) => item),
-            }))
+        type === "FIXED" || type === "SLOT_BUILDER"
+          ? packages.map((pkg, position) => {
+              // Each SLOT_BUILDER package has its own pool source — only
+              // send collectionIds/items for whichever one it's actually
+              // using, same convention as the bundle-wide pool below.
+              const pkgUsesCollections = type === "SLOT_BUILDER" && pkg.poolSource === "COLLECTIONS";
+              return {
+                id: pkg.id,
+                label: pkg.label,
+                badgeText: pkg.badgeText.trim() || null,
+                badgeTone: pkg.badgeTone || null,
+                position,
+                pricingType: pkg.pricingType,
+                pricingValue: parseFloat(pkg.pricingValue) || 0,
+                freeShipping: pkg.freeShipping,
+                poolSource: type === "SLOT_BUILDER" ? pkg.poolSource : "PRODUCTS",
+                slotCount: type === "SLOT_BUILDER" ? parseInt(pkg.slotCount, 10) || 0 : 0,
+                collectionIds: pkgUsesCollections ? pkg.collections.map((c) => c.id) : [],
+                // Pool items (isGift: false) aren't sent when this package's
+                // pool is collection-sourced — only its free gifts are.
+                items: (pkgUsesCollections ? pkg.items.filter((i) => i.isGift) : pkg.items).map(
+                  ({ price: _price, missing: _missing, ...item }) => item,
+                ),
+              };
+            })
           : [],
+      // SLOT_BUILDER no longer needs a bundle-level rule — slot count and
+      // pool now live per package instead (see `packages` above).
       rule:
         type === "MIX_MATCH"
           ? {
@@ -1049,17 +1212,9 @@ export default function BundleBuilder() {
                 .filter((t) => t.quantity > 0 && t.discount > 0),
               collectionIds,
             }
-          : type === "SLOT_BUILDER"
-            ? {
-                // Customers must fill every slot, so min = max = slot count
-                minItems: slots,
-                maxItems: slots,
-                discountTiers: [],
-                collectionIds,
-              }
-            : type === "QUANTITY_BREAKS" && usesCollections
-              ? { minItems: 1, maxItems: null, discountTiers: [], collectionIds }
-              : null,
+          : type === "QUANTITY_BREAKS" && usesCollections
+            ? { minItems: 1, maxItems: null, discountTiers: [], collectionIds }
+            : null,
     };
     fetcher.submit(
       { payload: JSON.stringify(payload) },
@@ -1069,18 +1224,30 @@ export default function BundleBuilder() {
     fetcher, title, description, type, status, pricingType, pricingValue,
     widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
     showSubtextOnGifts, freeShipping, items, packages, minItems, maxItems, tiers, poolSource,
-    collections, slotCount, qbTiers,
+    collections, qbTiers,
   ]);
 
-  // Mirrors the compare-at math in publishFixedBundleProduct so merchants see
-  // exactly what will be set on the bundle product
-  const combinedPrice = useMemo(
-    () =>
-      Math.round(
-        paidItems.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0) * 100,
-      ) / 100,
-    [paidItems],
-  );
+  // Mirrors the compare-at math in publishFixedBundleProduct/
+  // publishSlotBuilderBundleProduct so merchants see exactly what will be
+  // set on the bundle product. FIXED's paidItems are the bundle's actual
+  // contents, so their prices sum directly. SLOT_BUILDER's paidItems are its
+  // *pool* — the customer only gets `slotCount` of them, not all of them —
+  // so the comparable "buy these separately" price is the pool's average
+  // item price times the slot count instead. Only computable when the pool
+  // is PRODUCTS-sourced (a COLLECTIONS pool has no priced items loaded
+  // client-side), same as paidItems being empty for FIXED with no items yet.
+  const combinedPrice = useMemo(() => {
+    if (type === "SLOT_BUILDER") {
+      const priced = paidItems.filter((i) => i.price != null);
+      const slots = parseInt(packages[activePackageIndex]?.slotCount ?? "0", 10) || 0;
+      if (priced.length === 0 || slots === 0) return 0;
+      const average = priced.reduce((sum, i) => sum + (i.price ?? 0), 0) / priced.length;
+      return Math.round(average * slots * 100) / 100;
+    }
+    return (
+      Math.round(paidItems.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0) * 100) / 100
+    );
+  }, [type, paidItems, packages, activePackageIndex]);
   const hasMissingPrices = activeItems.some((i) => i.price == null);
   const computedBundlePrice = useMemo(() => {
     const value = parseFloat(activePricingValue) || 0;
@@ -1130,9 +1297,9 @@ export default function BundleBuilder() {
       .join(" · ");
   }, [type, activePricingType, activePricingValue, tiers, qbTiers]);
 
-  const showCollectionPool = type !== "FIXED" && poolSource === "COLLECTIONS";
+  const showCollectionPool = type !== "FIXED" && activePoolSource === "COLLECTIONS";
   // QUANTITY_BREAKS only — every other type only ever has PRODUCTS/COLLECTIONS
-  const showAllProductsNotice = type === "QUANTITY_BREAKS" && poolSource === "ALL";
+  const showAllProductsNotice = type === "QUANTITY_BREAKS" && activePoolSource === "ALL";
 
   return (
     <Page
@@ -1186,7 +1353,7 @@ export default function BundleBuilder() {
           </Banner>
         )}
 
-        {(type === "FIXED"
+        {(type === "FIXED" || type === "SLOT_BUILDER"
           ? packages.some((pkg) => pkg.items.some((i) => i.missing))
           : items.some((i) => i.missing)) && (
           <Banner tone="critical" title="Some products no longer exist">
@@ -1282,6 +1449,85 @@ export default function BundleBuilder() {
                     />
                   </BlockStack>
                 </Card>
+              ) : type === "SLOT_BUILDER" ? (
+                <Card>
+                  <BlockStack gap="400">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text as="h2" variant="headingMd">
+                        Packages
+                      </Text>
+                      <Button icon={PlusIcon} onClick={addPackage}>
+                        Add package
+                      </Button>
+                    </InlineStack>
+                    <PackagesTabsSection
+                      packages={packages}
+                      activePackageIndex={activePackageIndex}
+                      setActivePackageIndex={setActivePackageIndex}
+                      updateActivePackage={updateActivePackage}
+                      removeActivePackage={removeActivePackage}
+                    />
+                    <Divider />
+                    <ProductsSection
+                      type={type}
+                      poolSource={activePoolSource}
+                      setPoolSource={setActivePoolSource}
+                      showCollectionPool={showCollectionPool}
+                      showAllProductsNotice={showAllProductsNotice}
+                      collections={activeCollections}
+                      setCollections={setActiveCollections}
+                      paidItems={paidItems}
+                      setActiveItems={setActiveItems}
+                      openResourcePicker={openResourcePicker}
+                      openCollectionPicker={openCollectionPicker}
+                    />
+                    <Divider />
+                    <BlockStack gap="400">
+                      <Text as="h2" variant="headingMd">
+                        Slots
+                      </Text>
+                      <div style={{ maxWidth: 200 }}>
+                        <TextField
+                          label="Number of slots"
+                          type="number"
+                          min={2}
+                          value={packages[activePackageIndex]?.slotCount ?? "2"}
+                          onChange={(value) => updateActivePackage({ slotCount: value })}
+                          autoComplete="off"
+                          helpText="Customers fill every slot in this package to complete the bundle."
+                        />
+                      </div>
+                    </BlockStack>
+                    <Divider />
+                    <GiftsSection
+                      giftItems={giftItems}
+                      setActiveItems={setActiveItems}
+                      openResourcePicker={openResourcePicker}
+                      freeShipping={packages[activePackageIndex]?.freeShipping ?? false}
+                      onFreeShippingChange={(checked) =>
+                        updateActivePackage({ freeShipping: checked })
+                      }
+                    />
+                    <Divider />
+                    <PricingSection
+                      type={type}
+                      activePricingType={activePricingType}
+                      activePricingValue={activePricingValue}
+                      onPricingTypeChange={(value) =>
+                        updateActivePackage({ pricingType: value })
+                      }
+                      onPricingValueChange={(value) =>
+                        updateActivePackage({ pricingValue: value })
+                      }
+                      pricingValueError={pricingValueError}
+                      paidItems={paidItems}
+                      combinedPrice={combinedPrice}
+                      computedBundlePrice={computedBundlePrice}
+                      savings={savings}
+                      hasMissingPrices={hasMissingPrices}
+                    />
+                  </BlockStack>
+                </Card>
               ) : (
                 <>
                   <Card>
@@ -1299,27 +1545,6 @@ export default function BundleBuilder() {
                       openCollectionPicker={openCollectionPicker}
                     />
                   </Card>
-
-                  {type === "SLOT_BUILDER" && (
-                    <Card>
-                      <BlockStack gap="400">
-                        <Text as="h2" variant="headingMd">
-                          Slots
-                        </Text>
-                        <div style={{ maxWidth: 200 }}>
-                          <TextField
-                            label="Number of slots"
-                            type="number"
-                            min={2}
-                            value={slotCount}
-                            onChange={setSlotCount}
-                            autoComplete="off"
-                            helpText="Customers fill every slot to complete the bundle."
-                          />
-                        </div>
-                      </BlockStack>
-                    </Card>
-                  )}
 
                   {type === "QUANTITY_BREAKS" ? (
                     <>
@@ -1345,22 +1570,6 @@ export default function BundleBuilder() {
                         />
                       </Card>
                     </>
-                  ) : type !== "MIX_MATCH" ? (
-                    <Card>
-                      <PricingSection
-                        type={type}
-                        activePricingType={activePricingType}
-                        activePricingValue={activePricingValue}
-                        onPricingTypeChange={setPricingType}
-                        onPricingValueChange={setPricingValue}
-                        pricingValueError={pricingValueError}
-                        paidItems={paidItems}
-                        combinedPrice={combinedPrice}
-                        computedBundlePrice={computedBundlePrice}
-                        savings={savings}
-                        hasMissingPrices={hasMissingPrices}
-                      />
-                    </Card>
                   ) : (
                     <Card>
                       <MixMatchRulesSection
@@ -1376,7 +1585,7 @@ export default function BundleBuilder() {
                 </>
               )}
 
-              {type === "FIXED" && (
+              {(type === "FIXED" || type === "SLOT_BUILDER") && (
                 <Card>
                   <FixedAppearanceSection
                     widgetStyle={widgetStyle}
@@ -1406,13 +1615,13 @@ export default function BundleBuilder() {
               setStatus={setStatus}
               showAllProductsNotice={showAllProductsNotice}
               showCollectionPool={showCollectionPool}
-              collections={collections}
-              activeItems={activeItems}
-              itemCount={items.length}
+              collections={activeCollections}
+              activeItems={type === "SLOT_BUILDER" ? paidItems : activeItems}
+              itemCount={paidItems.length}
               previewSummary={previewSummary}
               minItems={minItems}
               maxItems={maxItems}
-              slotCount={slotCount}
+              slotCount={packages[activePackageIndex]?.slotCount ?? ""}
               isNew={isNew}
               bundleId={bundle?.id}
               shopifyProductId={bundle?.shopifyProductId}

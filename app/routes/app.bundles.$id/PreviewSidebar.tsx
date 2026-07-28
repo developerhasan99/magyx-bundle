@@ -218,12 +218,12 @@ export function PreviewSidebar({
               {type === "FIXED"
                 ? "When set to Active, Magyx Bundle creates a bundle product in your store. It's expanded into its components at checkout, so inventory stays accurate."
                 : type === "SLOT_BUILDER"
-                  ? "When set to Active, this bundle gets its own product page where customers fill each slot from your product pool. Storefront widget support is coming next."
+                  ? "When set to Active, Magyx Bundle creates a bundle product in your store. Customers fill each slot from your product pool on its product page, and it's expanded into their picks at checkout, so inventory stays accurate."
                   : type === "QUANTITY_BREAKS"
                     ? "When set to Active, the quantity breaks widget shows automatically on this product's page once you've added the theme block — no separate product is created, and discounts apply automatically at checkout."
                     : "When set to Active, the mix & match builder becomes available as an app block in your theme editor, and discounts apply automatically at checkout."}
             </Text>
-            {!isNew && type === "FIXED" && shopifyProductId && (
+            {!isNew && (type === "FIXED" || type === "SLOT_BUILDER") && shopifyProductId && (
               shopifyProduct ? (
                 <Box
                   borderColor="border"

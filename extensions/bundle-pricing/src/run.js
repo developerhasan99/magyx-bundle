@@ -14,6 +14,15 @@
  *    resolved collection product list, no attribute needed) and grouped per
  *    product; when a product's total quantity reaches a tier, its lines are
  *    repriced per that tier's own pricing type.
+ * 4. SLOT BUILDER bundles — a cart line tagged with the `_magyx_slot_bundle_id`
+ *    attribute carries the customer's slot picks in `_magyx_slot_selection`
+ *    (JSON `[{productId, variantId, quantity}]`). Every pick is checked
+ *    against that bundle's own resolved pool (`slotPoolProductIds`) and the
+ *    total must equal its slot count — untrusted client data never
+ *    determines price or which products ship, only *which* pool members
+ *    were chosen. The line's own price (merchant-set, immutable per publish)
+ *    is split evenly across the picks and expanded exactly like a FIXED
+ *    bundle, plus whichever package's free gifts/free-shipping apply.
  */
 
 const NO_CHANGES = { operations: [] };
@@ -32,6 +41,11 @@ export function run(input) {
   if (config?.bundles?.length) {
     operations.push(...buildMixMatchOperations(input.cart.lines, config.bundles));
     operations.push(...buildQuantityBreakOperations(input.cart.lines, config.bundles));
+
+    for (const line of input.cart.lines) {
+      const expandOp = buildSlotBuilderExpandOperation(line, config.bundles);
+      if (expandOp) operations.push({ expand: expandOp });
+    }
   }
 
   return operations.length ? { operations } : NO_CHANGES;
@@ -103,6 +117,86 @@ function buildExpandOperation(line, componentsValue) {
       },
       // Visible cart/checkout line item property so gift components are
       // clearly called out to the customer instead of just showing $0.00.
+      attributes: [{ key: "Free Gift", value: "Yes" }],
+    });
+  }
+
+  return { cartLineId: line.id, expandedCartItems };
+}
+
+// SLOT_BUILDER: the customer's picks aren't known until add-to-cart time, so
+// (unlike FIXED) they can't be baked into a variant metafield at publish
+// time — they arrive as cart line properties instead. Nothing about price or
+// product eligibility is trusted from that client data: the line's own price
+// is always the merchant-set total, and every pick must resolve to a member
+// of *that package's own* pool (`slotPoolProductIds`, resolved server-side at
+// save time — each package/bottle-size has an independent pool and slot
+// count) with the total matching that package's slot count exactly. Any
+// mismatch leaves the line un-expanded rather than guessing — a forged
+// property should never be able to swap in an out-of-pool product or a
+// partial pick.
+function buildSlotBuilderExpandOperation(line, bundles) {
+  const bundleId = line.slotBundleId?.value;
+  const selectionRaw = line.slotSelection?.value;
+  if (!bundleId || !selectionRaw) return null;
+
+  const bundle = bundles.find((b) => b.id === bundleId && b.type === "SLOT_BUILDER");
+  if (!bundle) return null;
+
+  const pkg = (bundle.packages ?? []).find((p) => p.shopifyVariantId === line.merchandise.id);
+  if (!pkg) return null;
+
+  const selection = parseJson(selectionRaw);
+  if (!Array.isArray(selection) || selection.length === 0) return null;
+
+  const slotCount = pkg.slotCount ?? 0;
+  const poolProductIds = new Set(pkg.slotPoolProductIds ?? []);
+
+  let totalQuantity = 0;
+  for (const item of selection) {
+    if (!item?.variantId || !item?.productId || !poolProductIds.has(item.productId)) return null;
+    const quantity = item.quantity ?? 1;
+    if (quantity < 1) return null;
+    totalQuantity += quantity;
+  }
+  if (slotCount <= 0 || totalQuantity !== slotCount) return null;
+
+  // Bundle Builder is fixed-price only, and there's no trustworthy per-pick
+  // catalog price to weight by (it would have to come from the client) — an
+  // even split across the filled slots needs nothing but the line's own
+  // already-trusted price.
+  const bundlePrice = parseFloat(line.cost.amountPerQuantity.amount);
+  const perUnit = Math.round((bundlePrice / slotCount) * 100) / 100;
+
+  const freeShippingAttributes = pkg?.freeShipping
+    ? [{ key: "_magyx_free_shipping", value: "true" }]
+    : [];
+
+  const expandedCartItems = [];
+  let allocated = 0;
+  selection.forEach((item, index) => {
+    const quantity = item.quantity ?? 1;
+    let unitPrice;
+    if (index === selection.length - 1) {
+      unitPrice = (bundlePrice - allocated) / quantity;
+    } else {
+      unitPrice = perUnit;
+    }
+    unitPrice = Math.round(unitPrice * 100) / 100;
+    allocated += unitPrice * quantity;
+    expandedCartItems.push({
+      merchandiseId: item.variantId,
+      quantity,
+      price: { adjustment: { fixedPricePerUnit: { amount: unitPrice.toFixed(2) } } },
+      attributes: index === 0 ? freeShippingAttributes : undefined,
+    });
+  });
+
+  for (const gift of Array.isArray(pkg?.gifts) ? pkg.gifts : []) {
+    expandedCartItems.push({
+      merchandiseId: gift.variantId,
+      quantity: gift.quantity ?? 1,
+      price: { adjustment: { fixedPricePerUnit: { amount: "0.00" } } },
       attributes: [{ key: "Free Gift", value: "Yes" }],
     });
   }

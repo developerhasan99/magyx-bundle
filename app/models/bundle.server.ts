@@ -65,6 +65,12 @@ export interface PackageInput {
   pricingType: PricingType;
   pricingValue: number;
   freeShipping: boolean;
+  // SLOT_BUILDER only: this package's own product pool + slot count — ALL |
+  // PRODUCTS scope isn't used here (unlike QUANTITY_BREAKS), just PRODUCTS |
+  // COLLECTIONS. Ignored (left at defaults) for FIXED.
+  poolSource: string;
+  slotCount: number;
+  collectionIds: string[];
   items: BundleItemInput[];
 }
 
@@ -174,6 +180,9 @@ function packagesCreateData(packages: PackageInput[]) {
     pricingType: pkg.pricingType,
     pricingValue: pkg.pricingValue,
     freeShipping: pkg.freeShipping,
+    poolSource: pkg.poolSource,
+    slotCount: pkg.slotCount,
+    collectionIds: JSON.stringify(pkg.collectionIds),
     items: { create: pkg.items },
   }));
 }
@@ -250,6 +259,9 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         pricingType: pkg.pricingType,
         pricingValue: pkg.pricingValue,
         freeShipping: pkg.freeShipping,
+        poolSource: pkg.poolSource,
+        slotCount: pkg.slotCount,
+        collectionIds: JSON.stringify(pkg.collectionIds),
       };
       if (pkg.id && existingPackageIds.has(pkg.id)) {
         await tx.bundlePackageItem.deleteMany({ where: { packageId: pkg.id } });

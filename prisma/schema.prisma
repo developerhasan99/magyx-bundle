@@ -116,6 +116,12 @@ model BundlePackage {
   pricingValue     Float               @default(0)
   freeShipping     Boolean             @default(false)
   shopifyVariantId String?
+  // SLOT_BUILDER only: this package's own product pool + slot count,
+  // independent per package (e.g. "30ml" and "100ml" can offer different
+  // pools/slot counts). Unused (defaults) for FIXED.
+  poolSource       String              @default("PRODUCTS") // PRODUCTS | COLLECTIONS
+  slotCount        Int                 @default(2)
+  collectionIds    String              @default("[]") // JSON array of eligible collection GIDs
   items            BundlePackageItem[]
 }
 

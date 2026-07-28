@@ -1,0 +1,33 @@
+{%- comment -%}
+  Every editable option for this widget (slot count, packages, gifts,
+  appearance) is set from the Magyx Bundle app admin, not the theme editor —
+  this block intentionally has no schema settings, same convention as the
+  Bundle Contents block. It reads the fully-resolved config straight off the
+  product's display metafield. Pool contents aren't included in that
+  metafield (a collection-scoped pool can change without a republish) — the
+  widget's JS fetches those live from the app proxy instead.
+{%- endcomment -%}
+{%- assign bundle_data = product.metafields.magyx_bundle.slot_builder.value -%}
+{%- if bundle_data.bundleId != blank -%}
+  <div
+    class="magyx-slot-builder"
+    style="--bc-accent: {{ bundle_data.settings.accentColor | default: '#1a1a1a' }};"
+    data-money-format="{{ shop.money_format | escape }}"
+    {{ block.shopify_attributes }}
+  >
+    <script type="application/json" data-magyx-slot-builder-data>
+      {{ bundle_data | json }}
+    </script>
+    <div class="magyx-slot-builder__state"></div>
+  </div>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Bundle Builder",
+  "target": "section",
+  "stylesheet": "magyx-bundle.css",
+  "javascript": "magyx-bundle-slot-builder.js",
+  "settings": []
+}
+{% endschema %}

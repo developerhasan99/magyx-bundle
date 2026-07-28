@@ -11,6 +11,12 @@ query RunInput {
       bundleId: attribute(key: "_magyx_bundle_id") {
         value
       }
+      slotBundleId: attribute(key: "_magyx_slot_bundle_id") {
+        value
+      }
+      slotSelection: attribute(key: "_magyx_slot_selection") {
+        value
+      }
       merchandise {
         ... on ProductVariant {
           id

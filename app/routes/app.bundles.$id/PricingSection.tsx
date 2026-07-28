@@ -2,7 +2,10 @@ import { BlockStack, Text, ChoiceList, TextField, Box, InlineStack, Divider } fr
 import type { ItemState } from "./types";
 
 // Shared pricing controls (fixed price / percent off / amount off) plus the
-// FIXED-only compare-at math box.
+// FIXED-only compare-at math box. SLOT_BUILDER is fixed-price only (a
+// customer's slot picks aren't known until checkout, so there's no
+// trustworthy "combined price" to discount off of) — it skips the pricing
+// type choice entirely.
 export function PricingSection({
   type,
   activePricingType,
@@ -33,21 +36,25 @@ export function PricingSection({
       <Text as="h2" variant="headingMd">
         Pricing
       </Text>
-      <ChoiceList
-        title="Pricing"
-        titleHidden
-        choices={[
-          { label: "Fixed bundle price", value: "FIXED_PRICE" },
-          { label: "Percentage off combined price", value: "PERCENT_OFF" },
-          { label: "Amount off combined price", value: "AMOUNT_OFF" },
-        ]}
-        selected={[activePricingType]}
-        onChange={(value) => onPricingTypeChange(value[0])}
-      />
+      {type !== "SLOT_BUILDER" && (
+        <ChoiceList
+          title="Pricing"
+          titleHidden
+          choices={[
+            { label: "Fixed bundle price", value: "FIXED_PRICE" },
+            { label: "Percentage off combined price", value: "PERCENT_OFF" },
+            { label: "Amount off combined price", value: "AMOUNT_OFF" },
+          ]}
+          selected={[activePricingType]}
+          onChange={(value) => onPricingTypeChange(value[0])}
+        />
+      )}
       <div style={{ maxWidth: 200 }}>
         <TextField
           label={
-            activePricingType === "FIXED_PRICE"
+            type === "SLOT_BUILDER"
+              ? "Bundle price"
+              : activePricingType === "FIXED_PRICE"
               ? "Bundle price"
               : activePricingType === "PERCENT_OFF"
                 ? "Discount"
@@ -64,7 +71,7 @@ export function PricingSection({
           error={pricingValueError}
         />
       </div>
-      {type === "FIXED" && paidItems.length > 0 && (
+      {(type === "FIXED" || type === "SLOT_BUILDER") && paidItems.length > 0 && (
         <Box background="bg-surface-secondary" borderRadius="200" padding="300">
           <BlockStack gap="200">
             <InlineStack align="space-between" blockAlign="center">
@@ -109,15 +116,15 @@ export function PricingSection({
             </InlineStack>
             {savings > 0 ? (
               <Text as="p" variant="bodySm" tone="subdued">
-                The original ${combinedPrice.toFixed(2)} combined
-                price is set as the compare-at (strikethrough)
-                price on the bundle product.
+                {type === "SLOT_BUILDER"
+                  ? `The original $${combinedPrice.toFixed(2)} price — the pool's average item price times the slot count — is set as the compare-at (strikethrough) price on the bundle product.`
+                  : `The original $${combinedPrice.toFixed(2)} combined price is set as the compare-at (strikethrough) price on the bundle product.`}
               </Text>
             ) : (
               <Text as="p" variant="bodySm" tone="caution">
-                The bundle price isn&apos;t below the combined
-                price of its products, so no compare-at price
-                will be shown to customers.
+                {type === "SLOT_BUILDER"
+                  ? "The bundle price isn't below the pool's average price for this many slots, so no compare-at price will be shown to customers."
+                  : "The bundle price isn't below the combined price of its products, so no compare-at price will be shown to customers."}
               </Text>
             )}
             {hasMissingPrices && (

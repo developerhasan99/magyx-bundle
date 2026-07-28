@@ -90,6 +90,11 @@ export interface PackageState {
   pricingValue: string;
   freeShipping: boolean;
   items: ItemState[];
+  // SLOT_BUILDER only: this package's own product pool + slot count.
+  // Unused by FIXED (stays at defaults).
+  poolSource: string;
+  collections: CollectionState[];
+  slotCount: string;
 }
 
 export function defaultPackageState(): PackageState {
@@ -102,6 +107,9 @@ export function defaultPackageState(): PackageState {
     pricingValue: "",
     freeShipping: false,
     items: [],
+    poolSource: "PRODUCTS",
+    collections: [],
+    slotCount: "2",
   };
 }
 
