@@ -1009,6 +1009,14 @@
   justify-content: center;
 }
 
+/* The base rule above sets display:flex unconditionally, which — being an
+   author style — outranks the browser's default `[hidden] { display: none }`
+   UA rule. Without this, toggling the `hidden` property in JS does nothing
+   and the modal renders open at all times. */
+.magyx-slot-builder-modal[hidden] {
+  display: none;
+}
+
 .magyx-slot-builder-modal__overlay {
   position: absolute;
   inset: 0;
