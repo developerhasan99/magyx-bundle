@@ -489,7 +489,7 @@ function resolveItemSubtext(template: string, details: ItemDetails): string {
  * subtext template against live product data — one extra query, only made
  * when a template is actually set.
  */
-async function fetchItemSubtexts(
+export async function fetchItemSubtexts(
   admin: AdminApiContext,
   items: { productId: string; variantId: string | null }[],
   template: string,

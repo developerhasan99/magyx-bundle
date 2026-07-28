@@ -887,7 +887,6 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
   border: 1px solid var(--bc-border);
   border-radius: var(--bc-radius);
   padding: 16px 12px;
@@ -909,12 +908,13 @@
 }
 
 .magyx-slot-builder__pack-tab-label {
-  font-size: 1.15em;
+  font-size: 14px;
   font-weight: 700;
+  line-height: 1.4;
 }
 
 .magyx-slot-builder__pack-tab-price {
-  font-size: 0.85em;
+  font-size: 12px;
   opacity: 0.65;
 }
 
@@ -974,21 +974,38 @@
   gap: 10px;
   border: 1px solid var(--bc-border);
   border-radius: var(--bc-radius);
-  padding: 8px 10px;
+  padding: 6px;
 }
 
 .magyx-slot-builder__pick-image {
-  width: 40px;
-  height: 40px;
+  width: 56px;
+  height: 56px;
   border-radius: 8px;
   object-fit: cover;
   background: #f6f6f6;
   flex-shrink: 0;
 }
 
-.magyx-slot-builder__pick-title {
+.magyx-slot-builder__pick-info {
   flex: 1;
-  font-weight: 500;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.magyx-slot-builder__pick-title {
+    font-weight: bold;
+    line-height: 1.4;
+    font-size: 14px;
+}
+
+.magyx-slot-builder__pick-subtext {
+  margin-top: 1px;
+  opacity: 0.6;
+  font-size: 0.85em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .magyx-slot-builder__pick-stepper {
@@ -996,29 +1013,25 @@
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
-  background: #f1f4f2;
+  border: 1px solid var(--bc-border);
   border-radius: 999px;
-  padding: 4px;
+  padding: 3px;
 }
 
 .magyx-slot-builder__pick-stepper button {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   border: none;
-  background: transparent;
-  font-size: 1em;
+  background-color: var(--bc-accent);
+  font-size: 1.05em;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
-  color: inherit;
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.magyx-slot-builder__pick-stepper button:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.08);
 }
 
 .magyx-slot-builder__pick-stepper button:disabled {
@@ -1027,10 +1040,9 @@
 }
 
 .magyx-slot-builder__pick-qty {
-  min-width: 1.2em;
+  min-width: 1.4em;
   text-align: center;
   font-weight: 700;
-  font-size: 0.9em;
 }
 
 .magyx-slot-builder__pick-remove {
@@ -1067,6 +1079,12 @@
   font-weight: 600;
   cursor: pointer;
   margin-bottom: 10px;
+}
+
+/* Same [hidden]-override pitfall as the price block above — display:flex is
+   an author style and would otherwise beat the UA's default [hidden] rule. */
+.magyx-slot-builder__add-btn[hidden] {
+  display: none;
 }
 
 .magyx-slot-builder__add-btn svg {
@@ -1292,6 +1310,12 @@
   margin: 0;
 }
 
+.magyx-slot-builder-modal__item-subtext {
+  margin: 2px 0 0;
+  opacity: 0.6;
+  font-size: 0.85em;
+}
+
 .magyx-slot-builder-modal__item-price {
   opacity: 0.65;
   font-size: 0.9em;
@@ -1305,7 +1329,7 @@
   flex-shrink: 0;
   border: 1px solid var(--bc-border);
   border-radius: 999px;
-  padding: 4px;
+  padding: 3px;
 }
 
 .magyx-slot-builder-modal__stepper button {

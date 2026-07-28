@@ -16,7 +16,10 @@
     return format
       .replace(/\{\{\s*amount\s*\}\}/, value)
       .replace(/\{\{\s*amount_no_decimals\s*\}\}/, String(Math.round(amount)))
-      .replace(/\{\{\s*amount_with_comma_separator\s*\}\}/, value.replace(".", ","));
+      .replace(
+        /\{\{\s*amount_with_comma_separator\s*\}\}/,
+        value.replace(".", ","),
+      );
   }
 
   function escapeHtml(text) {
@@ -59,7 +62,12 @@
     var stateEl = root.querySelector(".magyx-slot-builder__state");
     var packages = Array.isArray(data.packages) ? data.packages : [];
 
-    if (packages.length === 0 || packages.some(function (p) { return !(p.slotCount > 0); })) {
+    if (
+      packages.length === 0 ||
+      packages.some(function (p) {
+        return !(p.slotCount > 0);
+      })
+    ) {
       root.remove();
       return;
     }
@@ -71,7 +79,9 @@
       '<div class="magyx-slot-builder__skeleton-bar"></div>' +
       "</div>";
 
-    fetch("/apps/magyx-bundle/slot-builder/" + encodeURIComponent(data.bundleId))
+    fetch(
+      "/apps/magyx-bundle/slot-builder/" + encodeURIComponent(data.bundleId),
+    )
       .then(function (response) {
         if (!response.ok) throw new Error("Bundle builder unavailable");
         return response.json();
@@ -108,7 +118,9 @@
       }
 
       var nativeForm = findNativeForm();
-      var hasNativeButton = !!(nativeForm && nativeForm.querySelector('[name="id"]'));
+      var hasNativeButton = !!(
+        nativeForm && nativeForm.querySelector('[name="id"]')
+      );
 
       var html = "";
       html +=
@@ -117,7 +129,8 @@
         '<span class="magyx-slot-builder__price-compare" data-sb="price-compare" hidden></span>' +
         '<span class="magyx-slot-builder__price-save" data-sb="price-save" hidden></span>' +
         "</div>";
-      html += '<p class="magyx-slot-builder__price-per-unit" data-sb="price-per-unit" hidden></p>';
+      html +=
+        '<p class="magyx-slot-builder__price-per-unit" data-sb="price-per-unit" hidden></p>';
       if (data.settings && data.settings.heading) {
         html +=
           '<p class="magyx-slot-builder__heading">' +
@@ -125,18 +138,23 @@
           "</p>";
       }
       if (packages.length > 1) {
-        html += '<div class="magyx-slot-builder__packs" data-sb="packs" role="tablist"></div>';
+        html +=
+          '<div class="magyx-slot-builder__packs" data-sb="packs" role="tablist"></div>';
       }
-      html += '<div class="magyx-slot-builder__progress" data-sb="progress"></div>';
+      html +=
+        '<div class="magyx-slot-builder__progress" data-sb="progress"></div>';
       html += '<div class="magyx-slot-builder__picks" data-sb="picks"></div>';
       html +=
         '<button type="button" class="magyx-slot-builder__add-btn" data-sb="open">' +
         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>' +
-        "Add or edit products</button>";
-      html += '<p class="magyx-slot-builder__gifts" data-sb="gifts" hidden></p>';
-      html += '<p class="magyx-slot-builder__error" data-sb="error" hidden></p>';
+        "Add Items</button>";
+      html +=
+        '<p class="magyx-slot-builder__gifts" data-sb="gifts" hidden></p>';
+      html +=
+        '<p class="magyx-slot-builder__error" data-sb="error" hidden></p>';
       if (!hasNativeButton) {
-        html += '<button type="button" class="magyx-slot-builder__cta" data-sb="cta"></button>';
+        html +=
+          '<button type="button" class="magyx-slot-builder__cta" data-sb="cta"></button>';
       }
       html +=
         '<div class="magyx-slot-builder-modal" data-sb="modal" hidden>' +
@@ -215,7 +233,11 @@
       function selectionArray() {
         var arr = [];
         selections.forEach(function (item) {
-          arr.push({ productId: item.productId, variantId: item.variantId, quantity: item.quantity });
+          arr.push({
+            productId: item.productId,
+            variantId: item.variantId,
+            quantity: item.quantity,
+          });
         });
         return arr;
       }
@@ -225,7 +247,8 @@
         var index = 0;
         selections.forEach(function (item) {
           index += 1;
-          var value = item.quantity > 1 ? item.quantity + " × " + item.title : item.title;
+          var value =
+            item.quantity > 1 ? item.quantity + " × " + item.title : item.title;
           props.push({ key: "Item " + index, value: value });
         });
         return props;
@@ -242,7 +265,10 @@
           if (index === activePackageIndex) {
             tab.className += " magyx-slot-builder__pack-tab--active";
           }
-          tab.setAttribute("aria-pressed", index === activePackageIndex ? "true" : "false");
+          tab.setAttribute(
+            "aria-pressed",
+            index === activePackageIndex ? "true" : "false",
+          );
           var badge = pkg.badgeText
             ? ' <span class="magyx-slot-builder__pack-badge magyx-slot-builder__pack-badge--' +
               escapeHtml(pkg.badgeTone || "info") +
@@ -251,7 +277,10 @@
               "</span>"
             : "";
           tab.innerHTML =
-            '<span class="magyx-slot-builder__pack-tab-label">' + escapeHtml(pkg.label) + badge + "</span>" +
+            '<span class="magyx-slot-builder__pack-tab-label">' +
+            escapeHtml(pkg.label) +
+            badge +
+            "</span>" +
             (pkg.price != null
               ? '<span class="magyx-slot-builder__pack-tab-price">' +
                 formatMoney(pkg.price, moneyFormat) +
@@ -313,13 +342,16 @@
         priceSaveEl.hidden = !hasSavings;
         if (hasSavings) {
           priceCompareEl.textContent = formatMoney(comparePrice, moneyFormat);
-          priceSaveEl.textContent = "Save " + formatMoney(comparePrice - salePrice, moneyFormat);
+          priceSaveEl.textContent =
+            "Save " + formatMoney(comparePrice - salePrice, moneyFormat);
         }
 
         if (slots > 0) {
           pricePerUnitEl.hidden = false;
           pricePerUnitEl.textContent =
-            "That's only " + formatMoney(salePrice / slots, moneyFormat) + " per item.";
+            "That's only " +
+            formatMoney(salePrice / slots, moneyFormat) +
+            " per item.";
         } else {
           pricePerUnitEl.hidden = true;
         }
@@ -333,7 +365,10 @@
             ? "Choose " + left + " more product" + (left === 1 ? "" : "s")
             : total + " of " + (activePackage().slotCount || 0) + " selected";
         progressEl.textContent = text;
-        progressEl.classList.toggle("magyx-slot-builder__progress--complete", left === 0);
+        progressEl.classList.toggle(
+          "magyx-slot-builder__progress--complete",
+          left === 0,
+        );
       }
 
       function renderPicks() {
@@ -351,9 +386,16 @@
                   escapeHtml(item.title) +
                   '">'
                 : '<div class="magyx-slot-builder__pick-image"></div>') +
+              '<div class="magyx-slot-builder__pick-info">' +
               '<span class="magyx-slot-builder__pick-title">' +
               escapeHtml(item.title) +
               "</span>" +
+              (item.subtext
+                ? '<span class="magyx-slot-builder__pick-subtext">' +
+                  escapeHtml(item.subtext) +
+                  "</span>"
+                : "") +
+              "</div>" +
               '<div class="magyx-slot-builder__pick-stepper">' +
               '<button type="button" data-action="decrement" aria-label="Remove one ' +
               escapeHtml(item.title) +
@@ -370,28 +412,34 @@
               '<button type="button" class="magyx-slot-builder__pick-remove" aria-label="Remove ' +
               escapeHtml(item.title) +
               '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>';
-            row.querySelector('[data-action="increment"]').addEventListener("click", function () {
-              if (remaining() === 0) return;
-              item.quantity += 1;
-              selections.set(item.variantId, item);
-              update();
-              if (remaining() === 0) {
-                setTimeout(closeModal, 350);
-              }
-            });
-            row.querySelector('[data-action="decrement"]').addEventListener("click", function () {
-              item.quantity -= 1;
-              if (item.quantity <= 0) {
-                selections.delete(item.variantId);
-              } else {
+            row
+              .querySelector('[data-action="increment"]')
+              .addEventListener("click", function () {
+                if (remaining() === 0) return;
+                item.quantity += 1;
                 selections.set(item.variantId, item);
-              }
-              update();
-            });
-            row.querySelector(".magyx-slot-builder__pick-remove").addEventListener("click", function () {
-              selections.delete(item.variantId);
-              update();
-            });
+                update();
+                if (remaining() === 0) {
+                  setTimeout(closeModal, 350);
+                }
+              });
+            row
+              .querySelector('[data-action="decrement"]')
+              .addEventListener("click", function () {
+                item.quantity -= 1;
+                if (item.quantity <= 0) {
+                  selections.delete(item.variantId);
+                } else {
+                  selections.set(item.variantId, item);
+                }
+                update();
+              });
+            row
+              .querySelector(".magyx-slot-builder__pick-remove")
+              .addEventListener("click", function () {
+                selections.delete(item.variantId);
+                update();
+              });
             picksEl.appendChild(row);
           });
         }
@@ -423,7 +471,10 @@
           ctaBtn.disabled = true;
         } else {
           ctaBtn.textContent =
-            "Add to cart" + (pkg && pkg.price != null ? " — " + formatMoney(pkg.price, moneyFormat) : "");
+            "Add to cart" +
+            (pkg && pkg.price != null
+              ? " — " + formatMoney(pkg.price, moneyFormat)
+              : "");
           ctaBtn.disabled = false;
         }
       }
@@ -435,7 +486,8 @@
         if (poolItems.length === 0) {
           var empty = document.createElement("p");
           empty.className = "magyx-slot-builder__empty";
-          empty.textContent = "No products available for this option right now.";
+          empty.textContent =
+            "No products available for this option right now.";
           listEl.appendChild(empty);
           return;
         }
@@ -470,6 +522,11 @@
             '<p class="magyx-slot-builder-modal__item-title">' +
             escapeHtml(item.title) +
             "</p>" +
+            (item.subtext
+              ? '<p class="magyx-slot-builder-modal__item-subtext">' +
+                escapeHtml(item.subtext) +
+                "</p>"
+              : "") +
             (data.settings && data.settings.showPrices
               ? '<p class="magyx-slot-builder-modal__item-price">' +
                 formatMoney(item.price, moneyFormat) +
@@ -488,38 +545,43 @@
             ">+</button>" +
             "</div>";
 
-          row.querySelector('[data-action="increment"]').addEventListener("click", function () {
-            if (remaining() === 0) return;
-            var current = selections.get(item.variantId) || {
-              productId: item.productId,
-              variantId: item.variantId,
-              title: item.title,
-              image: item.image,
-              price: item.price,
-              quantity: 0,
-            };
-            current.quantity += 1;
-            selections.set(item.variantId, current);
-            renderList();
-            update();
-            if (remaining() === 0) {
-              // Let the shopper see their last pick register as selected
-              // before the modal closes on its own.
-              setTimeout(closeModal, 350);
-            }
-          });
-          row.querySelector('[data-action="decrement"]').addEventListener("click", function () {
-            var current = selections.get(item.variantId);
-            if (!current) return;
-            current.quantity -= 1;
-            if (current.quantity <= 0) {
-              selections.delete(item.variantId);
-            } else {
+          row
+            .querySelector('[data-action="increment"]')
+            .addEventListener("click", function () {
+              if (remaining() === 0) return;
+              var current = selections.get(item.variantId) || {
+                productId: item.productId,
+                variantId: item.variantId,
+                title: item.title,
+                image: item.image,
+                price: item.price,
+                subtext: item.subtext,
+                quantity: 0,
+              };
+              current.quantity += 1;
               selections.set(item.variantId, current);
-            }
-            renderList();
-            update();
-          });
+              renderList();
+              update();
+              if (remaining() === 0) {
+                // Let the shopper see their last pick register as selected
+                // before the modal closes on its own.
+                setTimeout(closeModal, 350);
+              }
+            });
+          row
+            .querySelector('[data-action="decrement"]')
+            .addEventListener("click", function () {
+              var current = selections.get(item.variantId);
+              if (!current) return;
+              current.quantity -= 1;
+              if (current.quantity <= 0) {
+                selections.delete(item.variantId);
+              } else {
+                selections.set(item.variantId, current);
+              }
+              renderList();
+              update();
+            });
 
           listEl.appendChild(row);
         });
@@ -535,7 +597,8 @@
           left === 0
             ? "Your bundle is ready!"
             : "Add " + left + " more product" + (left === 1 ? "" : "s");
-        modalSubtitleEl.textContent = "Build your " + slots + "-product bundle.";
+        modalSubtitleEl.textContent =
+          "Build your " + slots + "-product bundle.";
       }
 
       function update() {
@@ -544,6 +607,7 @@
         renderProgress();
         renderCta();
         renderModalHeader();
+        openBtn.hidden = remaining() === 0;
         errorEl.hidden = true;
       }
 
@@ -562,8 +626,12 @@
       openBtn.addEventListener("click", openModal);
       // Queried from modalEl, not stateEl — the modal was moved out to
       // <body> above, so these are no longer stateEl's descendants.
-      modalEl.querySelector('[data-sb="close"]').addEventListener("click", closeModal);
-      modalEl.querySelector('[data-sb="overlay"]').addEventListener("click", closeModal);
+      modalEl
+        .querySelector('[data-sb="close"]')
+        .addEventListener("click", closeModal);
+      modalEl
+        .querySelector('[data-sb="overlay"]')
+        .addEventListener("click", closeModal);
       searchInputEl.addEventListener("input", function () {
         searchText = searchInputEl.value.trim().toLowerCase();
         renderList();
@@ -573,7 +641,11 @@
         var left = remaining();
         errorEl.hidden = false;
         errorEl.textContent =
-          "Choose " + left + " more product" + (left === 1 ? "" : "s") + " before adding to cart.";
+          "Choose " +
+          left +
+          " more product" +
+          (left === 1 ? "" : "s") +
+          " before adding to cart.";
         openModal();
       }
 
@@ -584,12 +656,17 @@
       }
 
       function injectProperties(form) {
-        form.querySelectorAll("[data-magyx-slot-builder-property]").forEach(function (el) {
-          el.remove();
-        });
+        form
+          .querySelectorAll("[data-magyx-slot-builder-property]")
+          .forEach(function (el) {
+            el.remove();
+          });
         var props = buildProperties();
         props.push({ key: "_magyx_slot_bundle_id", value: data.bundleId });
-        props.push({ key: "_magyx_slot_selection", value: JSON.stringify(selectionArray()) });
+        props.push({
+          key: "_magyx_slot_selection",
+          value: JSON.stringify(selectionArray()),
+        });
         props.forEach(function (property) {
           var input = document.createElement("input");
           input.type = "hidden";
@@ -643,7 +720,13 @@
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              items: [{ id: parseInt(numericId(pkg.variantId), 10), quantity: 1, properties: props }],
+              items: [
+                {
+                  id: parseInt(numericId(pkg.variantId), 10),
+                  quantity: 1,
+                  properties: props,
+                },
+              ],
             }),
           })
             .then(function (response) {
@@ -653,7 +736,9 @@
             .catch(function () {
               ctaBtn.disabled = false;
               ctaBtn.textContent = originalLabel;
-              alert("Sorry, we couldn't add this to your cart. Please try again.");
+              alert(
+                "Sorry, we couldn't add this to your cart. Please try again.",
+              );
             });
         });
       }

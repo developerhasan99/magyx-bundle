@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { getBundle } from "../models/bundle.server";
-import { resolveCollectionProductIds } from "../models/shopify-sync.server";
+import { fetchItemSubtexts, resolveCollectionProductIds } from "../models/shopify-sync.server";
 
 /**
  * App proxy endpoint: storefront requests to
@@ -36,7 +36,15 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const allProductIds = Array.from(new Set(productIdsByPackage.flat()));
   const productById = new Map<
     string,
-    { productId: string; variantId: string; title: string; image: string | null; price: number; available: boolean }
+    {
+      productId: string;
+      variantId: string;
+      title: string;
+      image: string | null;
+      price: number;
+      available: boolean;
+      subtext: string | null;
+    }
   >();
   if (allProductIds.length > 0) {
     const response = await admin.graphql(
@@ -48,7 +56,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
             title
             featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
             variants(first: 1) {
-              edges { node { id price availableForSale } }
+              edges { node { id title price availableForSale } }
             }
           }
         }
@@ -60,14 +68,39 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       if (!product) continue;
       const variant = product.variants?.edges?.[0]?.node;
       if (!variant) continue;
+      const hasRealVariantTitle = variant.title && variant.title !== "Default Title";
       productById.set(product.id, {
         productId: product.id,
         variantId: variant.id,
-        title: product.title,
+        title: hasRealVariantTitle ? `${product.title} — ${variant.title}` : product.title,
         image: product.featuredImage?.url ?? null,
         price: parseFloat(variant.price),
         available: variant.availableForSale,
+        subtext: null,
       });
+    }
+
+    // Same "{{sku}}/{{vendor}}/{{metafield:...}}" template the admin sets
+    // once per bundle for the Bundle Contents widget — reused here so pool
+    // items and picks show the same subtext line. Soft-fails: a broken
+    // template shouldn't blank out the pool.
+    const subtextTemplate = bundle.itemSubtextTemplate?.trim();
+    if (subtextTemplate) {
+      try {
+        const subtextByKey = await fetchItemSubtexts(
+          admin,
+          Array.from(productById.values()).map((item) => ({
+            productId: item.productId,
+            variantId: item.variantId,
+          })),
+          subtextTemplate,
+        );
+        for (const item of productById.values()) {
+          item.subtext = subtextByKey.get(item.variantId ?? item.productId) || null;
+        }
+      } catch (error) {
+        console.warn("Magyx Bundle: could not resolve slot builder item subtext", error);
+      }
     }
   }
 
