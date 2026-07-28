@@ -111,6 +111,13 @@
       var hasNativeButton = !!(nativeForm && nativeForm.querySelector('[name="id"]'));
 
       var html = "";
+      html +=
+        '<div class="magyx-slot-builder__price" data-sb="price" hidden>' +
+        '<span class="magyx-slot-builder__price-sale" data-sb="price-sale"></span>' +
+        '<span class="magyx-slot-builder__price-compare" data-sb="price-compare" hidden></span>' +
+        '<span class="magyx-slot-builder__price-save" data-sb="price-save" hidden></span>' +
+        "</div>";
+      html += '<p class="magyx-slot-builder__price-per-unit" data-sb="price-per-unit" hidden></p>';
       if (data.settings && data.settings.heading) {
         html +=
           '<p class="magyx-slot-builder__heading">' +
@@ -146,6 +153,11 @@
 
       stateEl.innerHTML = html;
 
+      var priceEl = stateEl.querySelector('[data-sb="price"]');
+      var priceSaleEl = stateEl.querySelector('[data-sb="price-sale"]');
+      var priceCompareEl = stateEl.querySelector('[data-sb="price-compare"]');
+      var priceSaveEl = stateEl.querySelector('[data-sb="price-save"]');
+      var pricePerUnitEl = stateEl.querySelector('[data-sb="price-per-unit"]');
       var progressEl = stateEl.querySelector('[data-sb="progress"]');
       var picksEl = stateEl.querySelector('[data-sb="picks"]');
       var giftsEl = stateEl.querySelector('[data-sb="gifts"]');
@@ -155,6 +167,16 @@
       var listEl = stateEl.querySelector('[data-sb="list"]');
       var openBtn = stateEl.querySelector('[data-sb="open"]');
       var ctaBtn = stateEl.querySelector('[data-sb="cta"]');
+
+      // `position: fixed` only escapes to the viewport when nothing between
+      // this element and <body> establishes its own containing block
+      // (a transform/filter/will-change/contain on a theme wrapper is
+      // enough) — if it does, the modal gets trapped inside that ancestor's
+      // stacking context and a sticky header outside it can render on top
+      // regardless of z-index. Moving the modal to be a direct child of
+      // <body> sidesteps that entirely, since we don't control the theme's
+      // surrounding markup/CSS.
+      document.body.appendChild(modalEl);
 
       function totalQty() {
         var total = 0;
@@ -210,7 +232,13 @@
               escapeHtml(pkg.badgeText) +
               "</span>"
             : "";
-          tab.innerHTML = escapeHtml(pkg.label) + badge;
+          tab.innerHTML =
+            '<span class="magyx-slot-builder__pack-tab-label">' + escapeHtml(pkg.label) + badge + "</span>" +
+            (pkg.price != null
+              ? '<span class="magyx-slot-builder__pack-tab-price">' +
+                formatMoney(pkg.price, moneyFormat) +
+                "/ea</span>"
+              : "");
           tab.addEventListener("click", function () {
             if (index === activePackageIndex) return;
             // Each package has its own pool and slot count, so a prior
@@ -232,6 +260,51 @@
           });
           container.appendChild(tab);
         });
+      }
+
+      // Sale price is this package's own (flat) price. The compare-at price
+      // isn't the pool's average (that's the admin editor/checkout-truth
+      // math) — here it's simply the combined price of the first `slotCount`
+      // products in the pool, in whatever order the proxy returned them.
+      function renderPrice() {
+        var pkg = activePackage();
+        var salePrice = pkg.price;
+        if (salePrice == null) {
+          priceEl.hidden = true;
+          pricePerUnitEl.hidden = true;
+          return;
+        }
+        priceEl.hidden = false;
+        priceSaleEl.textContent = formatMoney(salePrice, moneyFormat);
+
+        var slots = pkg.slotCount || 0;
+        var comparePool = currentPoolItems()
+          .slice(0, slots)
+          .filter(function (item) {
+            return item.price != null;
+          });
+        var comparePrice =
+          comparePool.length > 0
+            ? comparePool.reduce(function (sum, item) {
+                return sum + item.price;
+              }, 0)
+            : null;
+
+        var hasSavings = comparePrice != null && comparePrice > salePrice;
+        priceCompareEl.hidden = !hasSavings;
+        priceSaveEl.hidden = !hasSavings;
+        if (hasSavings) {
+          priceCompareEl.textContent = formatMoney(comparePrice, moneyFormat);
+          priceSaveEl.textContent = "Save " + formatMoney(comparePrice - salePrice, moneyFormat);
+        }
+
+        if (slots > 0) {
+          pricePerUnitEl.hidden = false;
+          pricePerUnitEl.textContent =
+            "That's only " + formatMoney(salePrice / slots, moneyFormat) + " per item.";
+        } else {
+          pricePerUnitEl.hidden = true;
+        }
       }
 
       function renderProgress() {
@@ -390,6 +463,7 @@
       }
 
       function update() {
+        renderPrice();
         renderPicks();
         renderProgress();
         renderCta();
@@ -408,9 +482,11 @@
       }
 
       openBtn.addEventListener("click", openModal);
-      stateEl.querySelector('[data-sb="close"]').addEventListener("click", closeModal);
-      stateEl.querySelector('[data-sb="overlay"]').addEventListener("click", closeModal);
-      stateEl.querySelector('[data-sb="done"]').addEventListener("click", closeModal);
+      // Queried from modalEl, not stateEl — the modal was moved out to
+      // <body> above, so these are no longer stateEl's descendants.
+      modalEl.querySelector('[data-sb="close"]').addEventListener("click", closeModal);
+      modalEl.querySelector('[data-sb="overlay"]').addEventListener("click", closeModal);
+      modalEl.querySelector('[data-sb="done"]').addEventListener("click", closeModal);
 
       function showIncompleteError() {
         var left = remaining();

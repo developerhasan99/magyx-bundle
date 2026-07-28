@@ -523,7 +523,10 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
       bundle?.pricingType ?? (type === "MIX_MATCH" ? "PERCENT_OFF" : "FIXED_PRICE"),
     pricingValue: String(bundle?.pricingValue ?? ""),
     widgetStyle: bundle?.widgetStyle ?? "numbered",
-    widgetHeading: bundle?.widgetHeading ?? "What's inside",
+    // "What's inside" only makes sense as a default for FIXED (static
+    // contents) — Bundle Builder has nothing "inside" until the customer
+    // picks, so a new one starts with no heading unless the merchant sets one.
+    widgetHeading: bundle?.widgetHeading ?? (type === "SLOT_BUILDER" ? "" : "What's inside"),
     accentColor: bundle?.accentColor ?? "#1a1a1a",
     showPrices: bundle?.showPrices ?? false,
     itemSubtextTemplate: bundle?.itemSubtextTemplate ?? "",

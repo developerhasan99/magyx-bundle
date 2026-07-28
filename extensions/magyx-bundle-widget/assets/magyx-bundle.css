@@ -829,6 +829,45 @@
   font-size: 15px;
 }
 
+.magyx-slot-builder__price {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 4px;
+}
+
+/* Same [hidden]-override pitfall as the modal above — display:flex is an
+   author style and would otherwise beat the UA's default [hidden] rule. */
+.magyx-slot-builder__price[hidden] {
+  display: none;
+}
+
+.magyx-slot-builder__price-sale {
+  font-size: 1.8em;
+  font-weight: 800;
+}
+
+.magyx-slot-builder__price-compare {
+  font-size: 1.15em;
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.magyx-slot-builder__price-save {
+  background: #e60505;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85em;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.magyx-slot-builder__price-per-unit {
+  opacity: 0.65;
+  margin: 0 0 16px;
+}
+
 .magyx-slot-builder__heading {
   font-weight: 600;
   font-size: 1.05em;
@@ -838,23 +877,49 @@
 .magyx-slot-builder__packs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .magyx-slot-builder__pack-tab {
+  flex: 1 1 0;
+  min-width: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   border: 1px solid var(--bc-border);
-  border-radius: 999px;
-  padding: 6px 14px;
+  border-radius: var(--bc-radius);
+  padding: 16px 12px;
   background: #fff;
-  font-size: 0.92em;
+  color: inherit;
+  font: inherit;
   cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.magyx-slot-builder__pack-tab:hover {
+  border-color: var(--bc-accent);
 }
 
 .magyx-slot-builder__pack-tab--active {
   border-color: var(--bc-accent);
-  color: var(--bc-accent);
-  font-weight: 600;
+  background: var(--bc-accent);
+  color: #fff;
+}
+
+.magyx-slot-builder__pack-tab-label {
+  font-size: 1.15em;
+  font-weight: 700;
+}
+
+.magyx-slot-builder__pack-tab-price {
+  font-size: 0.85em;
+  opacity: 0.65;
+}
+
+.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-tab-price {
+  opacity: 0.85;
 }
 
 .magyx-slot-builder__pack-badge {
@@ -870,6 +935,16 @@
 .magyx-slot-builder__pack-badge--warning { background: #fff1c2; color: #6b5200; }
 .magyx-slot-builder__pack-badge--critical { background: #fbdada; color: #7a1010; }
 .magyx-slot-builder__pack-badge--new { background: #e6dcfb; color: #4a2a8a; }
+
+.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--success,
+.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--info,
+.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--attention,
+.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--warning,
+.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--critical,
+.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--new {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
 
 .magyx-slot-builder__progress {
   font-weight: 600;
@@ -1003,7 +1078,11 @@
 .magyx-slot-builder-modal {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  /* Max signed 32-bit int — themes routinely give sticky headers z-index
+     values well above small round numbers like 1000, and since we don't
+     control (or want to chase) whatever scheme a given theme uses, this is
+     the standard "must always win" value for a third-party overlay. */
+  z-index: 2147483647;
   display: flex;
   align-items: flex-end;
   justify-content: center;
