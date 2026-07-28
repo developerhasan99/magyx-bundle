@@ -130,7 +130,9 @@
       html += '<div class="magyx-slot-builder__progress" data-sb="progress"></div>';
       html += '<div class="magyx-slot-builder__picks" data-sb="picks"></div>';
       html +=
-        '<button type="button" class="magyx-slot-builder__add-btn" data-sb="open">Add or edit products</button>';
+        '<button type="button" class="magyx-slot-builder__add-btn" data-sb="open">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>' +
+        "Add or edit products</button>";
       html += '<p class="magyx-slot-builder__gifts" data-sb="gifts" hidden></p>';
       html += '<p class="magyx-slot-builder__error" data-sb="error" hidden></p>';
       if (!hasNativeButton) {
@@ -140,14 +142,16 @@
         '<div class="magyx-slot-builder-modal" data-sb="modal" hidden>' +
         '<div class="magyx-slot-builder-modal__overlay" data-sb="overlay"></div>' +
         '<div class="magyx-slot-builder-modal__panel" role="dialog" aria-modal="true">' +
+        '<button type="button" class="magyx-slot-builder-modal__close" data-sb="close" aria-label="Close">&times;</button>' +
         '<div class="magyx-slot-builder-modal__header">' +
         '<p class="magyx-slot-builder-modal__title" data-sb="modal-title"></p>' +
-        '<button type="button" class="magyx-slot-builder-modal__close" data-sb="close" aria-label="Close">&times;</button>' +
+        '<p class="magyx-slot-builder-modal__subtitle" data-sb="modal-subtitle"></p>' +
+        "</div>" +
+        '<div class="magyx-slot-builder-modal__search-wrap">' +
+        '<svg class="magyx-slot-builder-modal__search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg>' +
+        '<input type="text" class="magyx-slot-builder-modal__search" data-sb="search" placeholder="Search products…" autocomplete="off">' +
         "</div>" +
         '<div class="magyx-slot-builder-modal__list" data-sb="list"></div>' +
-        '<div class="magyx-slot-builder-modal__footer">' +
-        '<button type="button" class="magyx-slot-builder-modal__done" data-sb="done">Done</button>' +
-        "</div>" +
         "</div>" +
         "</div>";
 
@@ -164,9 +168,12 @@
       var errorEl = stateEl.querySelector('[data-sb="error"]');
       var modalEl = stateEl.querySelector('[data-sb="modal"]');
       var modalTitleEl = stateEl.querySelector('[data-sb="modal-title"]');
+      var modalSubtitleEl = stateEl.querySelector('[data-sb="modal-subtitle"]');
+      var searchInputEl = stateEl.querySelector('[data-sb="search"]');
       var listEl = stateEl.querySelector('[data-sb="list"]');
       var openBtn = stateEl.querySelector('[data-sb="open"]');
       var ctaBtn = stateEl.querySelector('[data-sb="cta"]');
+      var searchText = "";
 
       // `position: fixed` only escapes to the viewport when nothing between
       // this element and <body> establishes its own containing block
@@ -176,6 +183,17 @@
       // regardless of z-index. Moving the modal to be a direct child of
       // <body> sidesteps that entirely, since we don't control the theme's
       // surrounding markup/CSS.
+      // That move also takes the modal out of `.magyx-slot-builder`'s
+      // subtree, so the --bc-accent/--bc-border/--bc-radius custom
+      // properties set there (accent inline per-bundle, the other two in
+      // magyx-bundle.css) no longer cascade in — copy their resolved
+      // values onto the modal directly so its own border/accent-based
+      // styles still resolve.
+      var rootStyle = getComputedStyle(root);
+      ["--bc-accent", "--bc-border", "--bc-radius"].forEach(function (name) {
+        var value = rootStyle.getPropertyValue(name).trim();
+        if (value) modalEl.style.setProperty(name, value);
+      });
       document.body.appendChild(modalEl);
 
       function totalQty() {
@@ -320,12 +338,8 @@
 
       function renderPicks() {
         picksEl.innerHTML = "";
-        if (selections.size === 0) {
-          var empty = document.createElement("p");
-          empty.className = "magyx-slot-builder__empty";
-          empty.textContent = "No products chosen yet.";
-          picksEl.appendChild(empty);
-        } else {
+        if (selections.size > 0) {
+          var full = remaining() === 0;
           selections.forEach(function (item) {
             var row = document.createElement("div");
             row.className = "magyx-slot-builder__pick";
@@ -340,12 +354,40 @@
               '<span class="magyx-slot-builder__pick-title">' +
               escapeHtml(item.title) +
               "</span>" +
-              '<span class="magyx-slot-builder__pick-qty">×' +
+              '<div class="magyx-slot-builder__pick-stepper">' +
+              '<button type="button" data-action="decrement" aria-label="Remove one ' +
+              escapeHtml(item.title) +
+              '">−</button>' +
+              '<span class="magyx-slot-builder__pick-qty">' +
               item.quantity +
               "</span>" +
+              '<button type="button" data-action="increment" aria-label="Add one ' +
+              escapeHtml(item.title) +
+              '"' +
+              (full ? " disabled" : "") +
+              ">+</button>" +
+              "</div>" +
               '<button type="button" class="magyx-slot-builder__pick-remove" aria-label="Remove ' +
               escapeHtml(item.title) +
-              '">&times;</button>';
+              '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>';
+            row.querySelector('[data-action="increment"]').addEventListener("click", function () {
+              if (remaining() === 0) return;
+              item.quantity += 1;
+              selections.set(item.variantId, item);
+              update();
+              if (remaining() === 0) {
+                setTimeout(closeModal, 350);
+              }
+            });
+            row.querySelector('[data-action="decrement"]').addEventListener("click", function () {
+              item.quantity -= 1;
+              if (item.quantity <= 0) {
+                selections.delete(item.variantId);
+              } else {
+                selections.set(item.variantId, item);
+              }
+              update();
+            });
             row.querySelector(".magyx-slot-builder__pick-remove").addEventListener("click", function () {
               selections.delete(item.variantId);
               update();
@@ -397,11 +439,25 @@
           listEl.appendChild(empty);
           return;
         }
-        poolItems.forEach(function (item) {
+        var visibleItems = searchText
+          ? poolItems.filter(function (item) {
+              return item.title.toLowerCase().indexOf(searchText) !== -1;
+            })
+          : poolItems;
+        if (visibleItems.length === 0) {
+          var noMatch = document.createElement("p");
+          noMatch.className = "magyx-slot-builder__empty";
+          noMatch.textContent = "No products match your search.";
+          listEl.appendChild(noMatch);
+          return;
+        }
+        visibleItems.forEach(function (item) {
           var selected = selections.get(item.variantId);
           var qty = selected ? selected.quantity : 0;
           var row = document.createElement("div");
-          row.className = "magyx-slot-builder-modal__item";
+          row.className =
+            "magyx-slot-builder-modal__item" +
+            (qty > 0 ? " magyx-slot-builder-modal__item--selected" : "");
           row.innerHTML =
             (item.image
               ? '<img class="magyx-slot-builder-modal__item-image" loading="lazy" src="' +
@@ -421,7 +477,9 @@
               : "") +
             "</div>" +
             '<div class="magyx-slot-builder-modal__stepper">' +
-            '<button type="button" data-action="decrement" aria-label="Remove one">−</button>' +
+            '<button type="button" data-action="decrement" aria-label="Remove one"' +
+            (qty === 0 ? " disabled" : "") +
+            ">−</button>" +
             '<span class="magyx-slot-builder-modal__qty">' +
             qty +
             "</span>" +
@@ -444,6 +502,11 @@
             selections.set(item.variantId, current);
             renderList();
             update();
+            if (remaining() === 0) {
+              // Let the shopper see their last pick register as selected
+              // before the modal closes on its own.
+              setTimeout(closeModal, 350);
+            }
           });
           row.querySelector('[data-action="decrement"]').addEventListener("click", function () {
             var current = selections.get(item.variantId);
@@ -462,17 +525,32 @@
         });
       }
 
+      // Mirrors what the merchant's reference bundle builder does: the modal
+      // title itself tracks progress ("Add 2 more products" → "Your bundle
+      // is ready!") instead of a static "Choose N products" label.
+      function renderModalHeader() {
+        var left = remaining();
+        var slots = activePackage().slotCount || 0;
+        modalTitleEl.textContent =
+          left === 0
+            ? "Your bundle is ready!"
+            : "Add " + left + " more product" + (left === 1 ? "" : "s");
+        modalSubtitleEl.textContent = "Build your " + slots + "-product bundle.";
+      }
+
       function update() {
         renderPrice();
         renderPicks();
         renderProgress();
         renderCta();
+        renderModalHeader();
         errorEl.hidden = true;
       }
 
       function openModal() {
-        var slotCount = activePackage().slotCount || 0;
-        modalTitleEl.textContent = "Choose " + slotCount + " product" + (slotCount === 1 ? "" : "s");
+        searchText = "";
+        searchInputEl.value = "";
+        renderModalHeader();
         renderList();
         modalEl.hidden = false;
       }
@@ -486,7 +564,10 @@
       // <body> above, so these are no longer stateEl's descendants.
       modalEl.querySelector('[data-sb="close"]').addEventListener("click", closeModal);
       modalEl.querySelector('[data-sb="overlay"]').addEventListener("click", closeModal);
-      modalEl.querySelector('[data-sb="done"]').addEventListener("click", closeModal);
+      searchInputEl.addEventListener("input", function () {
+        searchText = searchInputEl.value.trim().toLowerCase();
+        renderList();
+      });
 
       function showIncompleteError() {
         var left = remaining();
