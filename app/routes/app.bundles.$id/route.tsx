@@ -908,9 +908,15 @@ export default function BundleBuilder() {
       multiple: true,
       action: "add",
       selectionIds,
-      // QUANTITY_BREAKS applies across every variant of a product — there's
-      // nothing to pick at the variant level, so hide that UI entirely.
-      ...(type === "QUANTITY_BREAKS" ? { filter: { variants: false } } : {}),
+      filter: {
+        // Only active products are purchasable in a bundle, so hide drafts
+        // and archived products from the picker.
+        draft: false,
+        archived: false,
+        // QUANTITY_BREAKS applies across every variant of a product — there's
+        // nothing to pick at the variant level, so hide that UI entirely.
+        ...(type === "QUANTITY_BREAKS" ? { variants: false } : {}),
+      },
     });
     if (!selection) return;
 
@@ -1047,6 +1053,12 @@ export default function BundleBuilder() {
         selectionIds: existingItems.map((i) =>
           i.variantId ? { id: i.productId, variants: [{ id: i.variantId }] } : { id: i.productId },
         ),
+        filter: {
+          // Only active products are purchasable in a bundle, so hide drafts
+          // and archived products from the picker.
+          draft: false,
+          archived: false,
+        },
       });
       if (!selection) return;
 
