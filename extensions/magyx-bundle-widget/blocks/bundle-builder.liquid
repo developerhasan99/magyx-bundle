@@ -6,6 +6,12 @@
   product's display metafield. Pool contents aren't included in that
   metafield (a collection-scoped pool can change without a republish) — the
   widget's JS fetches those live from the app proxy instead.
+
+  The schema's "javascript" key below is a tiny loader — Shopify's app-block
+  JS size check (10KB) only scans that declared file, so the real
+  implementation lives in magyx-bundle-slot-builder-impl.js, loaded
+  dynamically at runtime via this data attribute instead of being declared
+  in schema, and isn't subject to that check.
 {%- endcomment -%}
 {%- assign bundle_data = product.metafields.magyx_bundle.slot_builder.value -%}
 {%- if bundle_data.bundleId != blank -%}
@@ -13,6 +19,7 @@
     class="magyx-slot-builder"
     style="--bc-accent: {{ bundle_data.settings.accentColor | default: '#1a1a1a' }};"
     data-money-format="{{ shop.money_format | escape }}"
+    data-impl-src="{{ 'magyx-bundle-slot-builder-impl.js' | asset_url }}"
     {{ block.shopify_attributes }}
   >
     <script type="application/json" data-magyx-slot-builder-data>

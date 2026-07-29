@@ -19,6 +19,11 @@ pnpm-lock.yaml
 
 /extensions/*/dist
 
+# Minified build output of extensions/magyx-bundle-widget/src/*.js — see
+# "build:widget-js" in package.json, always run before `shopify app deploy`.
+# Source of truth lives in src/; these are regenerated every deploy.
+/extensions/magyx-bundle-widget/assets/*.js
+
 # Ignore shopify files created during app dev
 .shopify/*
 .shopify.lock
