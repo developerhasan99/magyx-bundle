@@ -216,7 +216,8 @@ export function ProductsSection({
           {collectionPoolItems.length === 0 ? (
             <Box padding="400">
               <Text as="p" tone="subdued" alignment="center">
-                No products found in the selected collection(s) yet.
+                Click "Resolve products" to preview which products and
+                variants will appear in the pool with the current settings.
               </Text>
             </Box>
           ) : (
