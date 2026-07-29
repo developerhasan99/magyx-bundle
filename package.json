@@ -6,7 +6,7 @@
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
-    "build:widget-js": "esbuild extensions/magyx-bundle-widget/src/*.js --minify --outdir=extensions/magyx-bundle-widget/assets",
+    "build:widget-js": "esbuild widget-src/*.js --minify --outdir=extensions/magyx-bundle-widget/assets",
     "deploy": "npm run build:widget-js && shopify app deploy",
     "config:use": "shopify app config use",
     "env": "shopify app env",
