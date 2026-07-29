@@ -13,7 +13,12 @@ import {
 import { DeleteIcon, ImageIcon, PlusIcon } from "@shopify/polaris-icons";
 import { BundleTypeCard } from "../../components/BundleTypeCard";
 import { formatMoney } from "../../utils/money";
-import { QUANTITY_BREAK_SCOPE_OPTIONS, type CollectionState, type ItemState } from "./types";
+import {
+  QUANTITY_BREAK_SCOPE_OPTIONS,
+  type CollectionState,
+  type ItemState,
+  type ResolvedPoolItem,
+} from "./types";
 
 // Shared product/collection pool block — reused by FIXED ("Products in
 // bundle"), MIX_MATCH/SLOT_BUILDER ("Product pool"), and QUANTITY_BREAKS
@@ -27,6 +32,7 @@ export function ProductsSection({
   showAllProductsNotice,
   collections,
   setCollections,
+  collectionPoolItems,
   paidItems,
   setActiveItems,
   openResourcePicker,
@@ -40,6 +46,7 @@ export function ProductsSection({
   showAllProductsNotice: boolean;
   collections: CollectionState[];
   setCollections: (updater: (current: CollectionState[]) => CollectionState[]) => void;
+  collectionPoolItems: ResolvedPoolItem[];
   paidItems: ItemState[];
   setActiveItems: (updater: (current: ItemState[]) => ItemState[]) => void;
   openResourcePicker: (isGiftFlag: boolean) => void;
@@ -159,7 +166,51 @@ export function ProductsSection({
             ))}
           </BlockStack>
         )
-      ) : paidItems.length === 0 ? (
+      ) : null}
+      {showCollectionPool && collections.length > 0 && (
+        <BlockStack gap="300">
+          <Divider />
+          <Text as="h3" variant="headingSm">
+            {collectionPoolItems.length === 0
+              ? "Resolved products"
+              : `Resolved products (${collectionPoolItems.length})`}
+          </Text>
+          {collectionPoolItems.length === 0 ? (
+            <Box padding="400">
+              <Text as="p" tone="subdued" alignment="center">
+                No products found in the selected collection(s) yet.
+              </Text>
+            </Box>
+          ) : (
+            <BlockStack gap="300">
+              {collectionPoolItems.map((item, index) => (
+                <Box key={item.variantId}>
+                  {index > 0 && <Box paddingBlockEnd="300"><Divider /></Box>}
+                  <InlineStack gap="300" blockAlign="center" wrap={false}>
+                    <Thumbnail
+                      source={item.imageUrl || ImageIcon}
+                      alt={item.title}
+                      size="small"
+                    />
+                    <BlockStack gap="050">
+                      <Text as="span" variant="bodyMd" fontWeight="medium">
+                        {item.title}
+                      </Text>
+                      {item.price != null && (
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          {formatMoney(item.price, shopCurrency)}
+                          {!item.available ? " · Out of stock" : ""}
+                        </Text>
+                      )}
+                    </BlockStack>
+                  </InlineStack>
+                </Box>
+              ))}
+            </BlockStack>
+          )}
+        </BlockStack>
+      )}
+      {!showCollectionPool && (paidItems.length === 0 ? (
         <Box padding="400">
           <Text as="p" tone="subdued" alignment="center">
             {type === "FIXED"
@@ -249,7 +300,7 @@ export function ProductsSection({
             </Box>
           ))}
         </BlockStack>
-      )}
+      ))}
     </BlockStack>
   );
 }

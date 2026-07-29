@@ -28,8 +28,10 @@ import {
   type BundleInput,
 } from "../../models/bundle.server";
 import {
+  fetchProductPoolItems,
   publishFixedBundleProduct,
   publishSlotBuilderBundleProduct,
+  resolveCollectionProductIds,
   syncBundleConfigMetafield,
 } from "../../models/shopify-sync.server";
 import {
@@ -39,6 +41,7 @@ import {
   type ItemState,
   type PackageState,
   type QbTierState,
+  type ResolvedPoolItem,
   type TierState,
 } from "./types";
 import { ProductsSection } from "./ProductsSection";
@@ -217,6 +220,44 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     );
   const collections = resolveCollections(collectionIds);
 
+  // Live preview of what each COLLECTIONS-sourced pool actually resolves to
+  // right now — every variant of every member product, same shape (and same
+  // resolver) the storefront proxy uses at add-to-cart time. Bundle-level
+  // for MIX_MATCH's pool / QUANTITY_BREAKS' "applies to"; per-package for
+  // SLOT_BUILDER. Uncapped by design: a merchant should never have a pool
+  // silently truncated in the editor. Soft-fails per collection so one bad
+  // lookup doesn't blank out every preview.
+  const resolveCollectionPoolItems = async (ids: string[]): Promise<ResolvedPoolItem[]> => {
+    if (ids.length === 0) return [];
+    try {
+      const productIds = await resolveCollectionProductIds(admin, ids);
+      const items = await fetchProductPoolItems(admin, productIds, bundle.itemSubtextTemplate);
+      return items.map((item) => ({
+        productId: item.productId,
+        variantId: item.variantId,
+        title: item.title,
+        imageUrl: item.image,
+        price: item.price,
+        available: item.available,
+      }));
+    } catch (error) {
+      console.warn("Magyx Bundle: could not resolve collection pool preview", error);
+      return [];
+    }
+  };
+  const [collectionPoolItems, packageCollectionPoolItems] = await Promise.all([
+    bundle.type !== "FIXED" && bundle.type !== "SLOT_BUILDER"
+      ? resolveCollectionPoolItems(collectionIds)
+      : Promise.resolve([]),
+    Promise.all(
+      bundle.packages.map((p, index) =>
+        bundle.type === "SLOT_BUILDER" && p.poolSource === "COLLECTIONS"
+          ? resolveCollectionPoolItems(packageCollectionIds[index])
+          : Promise.resolve([]),
+      ),
+    ),
+  ]);
+
   return {
     shopifyProduct,
     shopCurrency,
@@ -261,6 +302,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         poolSource: p.poolSource,
         slotCount: p.slotCount,
         collections: resolveCollections(packageCollectionIds[index]),
+        collectionPoolItems: packageCollectionPoolItems[index],
         items: p.items.map((i) => ({
           productId: i.productId,
           variantId: i.variantId,
@@ -274,6 +316,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         })),
       })),
       collections,
+      collectionPoolItems,
       tiers: bundle.tiers.map((t) => ({
         id: t.id,
         quantity: t.quantity,
@@ -578,6 +621,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
               freeShipping: p.freeShipping,
               poolSource: p.poolSource ?? "PRODUCTS",
               collections: (p.collections ?? []) as CollectionState[],
+              collectionPoolItems: (p.collectionPoolItems ?? []) as ResolvedPoolItem[],
               slotCount: String(p.slotCount ?? 2),
               items: p.items.map(
                 (i): ItemState => ({
@@ -595,6 +639,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
           )
         : [defaultPackageState()],
     collections: (bundle?.collections ?? []) as CollectionState[],
+    collectionPoolItems: (bundle?.collectionPoolItems ?? []) as ResolvedPoolItem[],
     // QUANTITY_BREAKS persists its scope explicitly (it needs a distinct
     // "ALL" value that can't be inferred from an empty items/collections
     // list); every other type still infers it from whether collections exist.
@@ -681,6 +726,9 @@ export default function BundleBuilder() {
   const [collections, setCollections] = useState<CollectionState[]>(
     initialForm.collections,
   );
+  // Read-only live preview, never edited client-side — refreshes whenever
+  // the loader re-runs (e.g. after save), no local state needed.
+  const collectionPoolItems = initialForm.collectionPoolItems;
   const [poolSource, setPoolSource] = useState<string>(initialForm.poolSource);
   const [minItems, setMinItems] = useState(initialForm.minItems);
   const [maxItems, setMaxItems] = useState(initialForm.maxItems);
@@ -761,6 +809,10 @@ export default function BundleBuilder() {
     type === "SLOT_BUILDER" ? (packages[activePackageIndex]?.poolSource ?? "PRODUCTS") : poolSource;
   const activeCollections =
     type === "SLOT_BUILDER" ? (packages[activePackageIndex]?.collections ?? []) : collections;
+  const activeCollectionPoolItems =
+    type === "SLOT_BUILDER"
+      ? (packages[activePackageIndex]?.collectionPoolItems ?? [])
+      : collectionPoolItems;
   const setActivePoolSource = useCallback(
     (value: string) => {
       if (type === "SLOT_BUILDER") updateActivePackage({ poolSource: value });
@@ -995,22 +1047,26 @@ export default function BundleBuilder() {
     setter((current) => {
       const relevant = type === "SLOT_BUILDER" ? current.filter((i) => !i.isGift) : current;
       const byProduct = new Map(relevant.map((i) => [i.productId, i]));
-      const newItems = selection.map(
-        (product: any) =>
-          byProduct.get(product.id) ?? {
-            productId: product.id,
-            // QUANTITY_BREAKS applies across every variant of the product —
-            // never pin to one, unlike MIX_MATCH which adds this specific
-            // variant to the cart when a shopper picks it.
-            variantId: type === "QUANTITY_BREAKS" ? null : (product.variants?.[0]?.id ?? null),
-            productTitle: product.title,
-            productImageUrl: product.images?.[0]?.originalSrc ?? null,
-            quantity: 1,
-            isGift: false,
-            price: toPrice(product.variants?.[0]?.price),
-            missing: false,
-          },
-      );
+      const newItems = selection.map((product: any) => {
+        const existing = byProduct.get(product.id);
+        if (existing) return existing;
+        // QUANTITY_BREAKS applies across every variant of the product —
+        // never pin to one, unlike MIX_MATCH which adds this specific
+        // variant to the cart when a shopper picks it.
+        const variant = type === "QUANTITY_BREAKS" ? null : (product.variants?.[0] ?? null);
+        const hasRealVariantTitle = variant?.title && variant.title !== "Default Title";
+        return {
+          productId: product.id,
+          variantId: variant?.id ?? null,
+          productTitle: hasRealVariantTitle ? `${product.title} — ${variant.title}` : product.title,
+          productImageUrl:
+            variant?.image?.originalSrc ?? product.images?.[0]?.originalSrc ?? null,
+          quantity: 1,
+          isGift: false,
+          price: toPrice(variant?.price),
+          missing: false,
+        };
+      });
       return type === "SLOT_BUILDER" ? [...current.filter((i) => i.isGift), ...newItems] : newItems;
     });
   }, [shopify, activeItems, type, setActiveItems]);
@@ -1452,6 +1508,7 @@ export default function BundleBuilder() {
                       showAllProductsNotice={showAllProductsNotice}
                       collections={collections}
                       setCollections={setCollections}
+                      collectionPoolItems={collectionPoolItems}
                       paidItems={paidItems}
                       setActiveItems={setActiveItems}
                       openResourcePicker={openResourcePicker}
@@ -1520,6 +1577,7 @@ export default function BundleBuilder() {
                       showAllProductsNotice={showAllProductsNotice}
                       collections={activeCollections}
                       setCollections={setActiveCollections}
+                      collectionPoolItems={activeCollectionPoolItems}
                       paidItems={paidItems}
                       setActiveItems={setActiveItems}
                       openResourcePicker={openResourcePicker}
@@ -1585,6 +1643,7 @@ export default function BundleBuilder() {
                       showAllProductsNotice={showAllProductsNotice}
                       collections={collections}
                       setCollections={setCollections}
+                      collectionPoolItems={collectionPoolItems}
                       paidItems={paidItems}
                       setActiveItems={setActiveItems}
                       openResourcePicker={openResourcePicker}

@@ -17,6 +17,19 @@ export interface CollectionState {
   imageUrl: string | null;
 }
 
+// Read-only preview of a COLLECTIONS-sourced pool's resolved contents — one
+// row per variant, same shape the storefront proxy already resolves. Live,
+// not persisted (same convention as ItemState's price/missing fields):
+// fetched fresh on every loader run, never sent back on save.
+export interface ResolvedPoolItem {
+  productId: string;
+  variantId: string;
+  title: string;
+  imageUrl: string | null;
+  price: number | null;
+  available: boolean;
+}
+
 export interface TierState {
   quantity: string;
   discount: string;
@@ -94,6 +107,8 @@ export interface PackageState {
   // Unused by FIXED (stays at defaults).
   poolSource: string;
   collections: CollectionState[];
+  // Live preview of collections' resolved contents — see ResolvedPoolItem.
+  collectionPoolItems: ResolvedPoolItem[];
   slotCount: string;
 }
 
@@ -109,6 +124,7 @@ export function defaultPackageState(): PackageState {
     items: [],
     poolSource: "PRODUCTS",
     collections: [],
+    collectionPoolItems: [],
     slotCount: "2",
   };
 }
