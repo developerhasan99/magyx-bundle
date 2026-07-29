@@ -495,7 +495,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             poolVariantIds: pkg.items
               .filter((i) => !i.isGift && i.variantId)
               .map((i) => i.variantId!),
-            poolProductIds: pkg.items.filter((i) => !i.isGift).map((i) => i.productId),
             collectionIds: JSON.parse(pkg.collectionIds) as string[],
             gifts: pkg.items
               .filter((i) => i.isGift && i.variantId)

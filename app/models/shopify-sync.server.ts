@@ -659,12 +659,47 @@ export interface ProductPoolItem {
   subtext: string | null;
 }
 
+// Same "{{sku}}/{{vendor}}/{{metafield:...}}" template the admin sets once
+// per bundle for the Bundle Contents widget — reused here so pool items show
+// the same subtext line everywhere. Soft-fails: a broken template shouldn't
+// blank out the pool. Shared by fetchProductPoolItems and
+// fetchVariantPoolItems below.
+async function attachPoolItemSubtext(
+  admin: AdminApiContext,
+  items: ProductPoolItem[],
+  subtextTemplate?: string | null,
+): Promise<void> {
+  const trimmedTemplate = subtextTemplate?.trim();
+  if (!trimmedTemplate) return;
+  try {
+    const subtextByKey = await fetchItemSubtexts(
+      admin,
+      items.map((item) => ({ productId: item.productId, variantId: item.variantId })),
+      trimmedTemplate,
+    );
+    for (const item of items) {
+      item.subtext = subtextByKey.get(item.variantId) || null;
+    }
+  } catch (error) {
+    console.warn("Magyx Bundle: could not resolve pool item subtext", error);
+  }
+}
+
 /**
  * Resolves display data (title/image/price/availability, optionally a
- * subtext line) for a bounded list of products' first variant. Shared by the
- * storefront's live slot-builder pool fetch and the publish-time pool
- * snapshot baked into the display metafield — same shape either way, just a
- * different (live vs. capped) set of product ids going in.
+ * subtext line) for every variant of a bounded list of products — a
+ * 3-variant product yields 3 pickable pool items, each addressable by its
+ * own variantId. Used for COLLECTIONS-sourced pools, where there's no
+ * merchant-picked variant to respect, so every variant of every product in
+ * the collection is pickable. Safe to expand past the first variant: the
+ * Cart Transform function's pool check
+ * (extensions/bundle-pricing/src/run.js) already only validates the picked
+ * productId is in-pool, not a specific variant.
+ *
+ * For PRODUCTS-sourced ("Specific products") pools, use
+ * fetchVariantPoolItems instead — the merchant already chose a specific
+ * variant there, and expanding to every sibling variant would silently
+ * override that choice.
  */
 export async function fetchProductPoolItems(
   admin: AdminApiContext,
@@ -681,8 +716,16 @@ export async function fetchProductPoolItems(
           id
           title
           featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
-          variants(first: 1) {
-            edges { node { id title price availableForSale } }
+          variants(first: 100) {
+            edges {
+              node {
+                id
+                title
+                price
+                availableForSale
+                image { url(transform: { maxWidth: 360, maxHeight: 360 }) }
+              }
+            }
           }
         }
       }
@@ -694,40 +737,77 @@ export async function fetchProductPoolItems(
   const items: ProductPoolItem[] = [];
   for (const product of json.data?.nodes ?? []) {
     if (!product) continue;
-    const variant = product.variants?.edges?.[0]?.node;
-    if (!variant) continue;
+    for (const edge of product.variants?.edges ?? []) {
+      const variant = edge.node;
+      const hasRealVariantTitle = variant.title && variant.title !== "Default Title";
+      items.push({
+        productId: product.id,
+        variantId: variant.id,
+        title: hasRealVariantTitle ? `${product.title} — ${variant.title}` : product.title,
+        image: variant.image?.url ?? product.featuredImage?.url ?? null,
+        price: parseFloat(variant.price),
+        available: variant.availableForSale,
+        subtext: null,
+      });
+    }
+  }
+
+  await attachPoolItemSubtext(admin, items, subtextTemplate);
+  return items;
+}
+
+/**
+ * Resolves display data for an EXACT list of variant ids — no expansion to
+ * sibling variants. Used for PRODUCTS-sourced ("Specific products") pools,
+ * where the merchant already picked a specific variant per product and that
+ * choice should be respected as-is. See fetchProductPoolItems for the
+ * COLLECTIONS-sourced counterpart, which expands to every variant instead.
+ */
+export async function fetchVariantPoolItems(
+  admin: AdminApiContext,
+  variantIds: string[],
+  subtextTemplate?: string | null,
+): Promise<ProductPoolItem[]> {
+  if (variantIds.length === 0) return [];
+
+  const response = await admin.graphql(
+    `#graphql
+    query variantPoolItems($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on ProductVariant {
+          id
+          title
+          price
+          availableForSale
+          image { url(transform: { maxWidth: 360, maxHeight: 360 }) }
+          product {
+            id
+            title
+            featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
+          }
+        }
+      }
+    }`,
+    { variables: { ids: variantIds } },
+  );
+  const json = await response.json();
+
+  const items: ProductPoolItem[] = [];
+  for (const variant of json.data?.nodes ?? []) {
+    if (!variant || !variant.product) continue;
     const hasRealVariantTitle = variant.title && variant.title !== "Default Title";
     items.push({
-      productId: product.id,
+      productId: variant.product.id,
       variantId: variant.id,
-      title: hasRealVariantTitle ? `${product.title} — ${variant.title}` : product.title,
-      image: product.featuredImage?.url ?? null,
+      title: hasRealVariantTitle ? `${variant.product.title} — ${variant.title}` : variant.product.title,
+      image: variant.image?.url ?? variant.product.featuredImage?.url ?? null,
       price: parseFloat(variant.price),
       available: variant.availableForSale,
       subtext: null,
     });
   }
 
-  // Same "{{sku}}/{{vendor}}/{{metafield:...}}" template the admin sets once
-  // per bundle for the Bundle Contents widget — reused here so pool items
-  // show the same subtext line everywhere. Soft-fails: a broken template
-  // shouldn't blank out the pool.
-  const trimmedTemplate = subtextTemplate?.trim();
-  if (trimmedTemplate) {
-    try {
-      const subtextByKey = await fetchItemSubtexts(
-        admin,
-        items.map((item) => ({ productId: item.productId, variantId: item.variantId })),
-        trimmedTemplate,
-      );
-      for (const item of items) {
-        item.subtext = subtextByKey.get(item.variantId) || null;
-      }
-    } catch (error) {
-      console.warn("Magyx Bundle: could not resolve pool item subtext", error);
-    }
-  }
-
+  await attachPoolItemSubtext(admin, items, subtextTemplate);
   return items;
 }
 
@@ -1221,16 +1301,17 @@ interface SlotBuilderPackageInput {
   freeShipping: boolean;
   poolSource: string; // PRODUCTS | COLLECTIONS
   slotCount: number;
-  // PRODUCTS-sourced pool variant ids, used only to compute this package's
-  // compare-at price (average pool item price × slot count). Empty when
-  // COLLECTIONS-sourced — averaging over a whole collection isn't worth a
-  // live resolve + bulk price fetch at publish time, so those packages just
-  // get no compare-at price, same as the admin editor's own preview.
+  // PRODUCTS-sourced pool variant ids — used to compute this package's
+  // compare-at price (average pool item price × slot count), and to resolve
+  // the exact-variant storefront pool snapshot below (no expansion to
+  // sibling variants, since the merchant already chose a specific one).
+  // Empty when COLLECTIONS-sourced — averaging over a whole collection isn't
+  // worth a live resolve + bulk price fetch at publish time, so those
+  // packages just get no compare-at price, same as the admin editor's own
+  // preview; their snapshot instead resolves (a capped number of)
+  // collectionIds and expands every variant, since there's no merchant-picked
+  // variant to respect there.
   poolVariantIds: string[];
-  // Used to resolve the bounded storefront pool snapshot below — PRODUCTS
-  // pools read straight off poolProductIds, COLLECTIONS pools resolve (a
-  // capped number of) collectionIds instead.
-  poolProductIds: string[];
   collectionIds: string[];
   gifts: { variantId: string; quantity: number }[];
   // Denormalized gift info for the storefront widget's gift display
@@ -1439,15 +1520,24 @@ export async function publishSlotBuilderBundleProduct(
 
     const poolSnapshotsByPackage = await Promise.all(
       input.packages.map(async (pkg) => {
-        const productIds =
-          pkg.poolSource === "PRODUCTS"
-            ? Array.from(new Set(pkg.poolProductIds)).slice(0, POOL_SNAPSHOT_LIMIT)
-            : (await resolveCollectionProductIds(admin, pkg.collectionIds, POOL_SNAPSHOT_LIMIT)).slice(
-                0,
-                POOL_SNAPSHOT_LIMIT,
-              );
         try {
-          return await fetchProductPoolItems(admin, productIds, subtextTemplate);
+          if (pkg.poolSource === "PRODUCTS") {
+            // Respect exactly the variant(s) the merchant picked — no
+            // expansion to sibling variants, same as the live proxy fetch.
+            const variantIds = Array.from(new Set(pkg.poolVariantIds)).slice(0, POOL_SNAPSHOT_LIMIT);
+            return await fetchVariantPoolItems(admin, variantIds, subtextTemplate);
+          }
+          // COLLECTIONS-sourced: no merchant-picked variant to respect, so
+          // every variant of every product is pickable. fetchProductPoolItems
+          // returns one entry per variant, so a multi-variant catalog can
+          // yield more items than productIds had entries — re-cap the
+          // flattened result to keep the snapshot's page-weight bounded
+          // regardless of variant count per product.
+          const productIds = (
+            await resolveCollectionProductIds(admin, pkg.collectionIds, POOL_SNAPSHOT_LIMIT)
+          ).slice(0, POOL_SNAPSHOT_LIMIT);
+          const items = await fetchProductPoolItems(admin, productIds, subtextTemplate);
+          return items.slice(0, POOL_SNAPSHOT_LIMIT);
         } catch (error) {
           console.warn("Magyx Bundle: could not resolve pool snapshot for package", pkg.packageId, error);
           return [];

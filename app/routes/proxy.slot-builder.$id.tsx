@@ -1,7 +1,11 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { getBundle } from "../models/bundle.server";
-import { fetchProductPoolItems, resolveCollectionProductIds } from "../models/shopify-sync.server";
+import {
+  fetchProductPoolItems,
+  fetchVariantPoolItems,
+  resolveCollectionProductIds,
+} from "../models/shopify-sync.server";
 
 /**
  * App proxy endpoint: storefront requests to
@@ -25,27 +29,62 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     return json({ error: "Bundle not found" }, { status: 404 });
   }
 
+  // PRODUCTS-sourced packages keep exactly the variant(s) the merchant
+  // picked — no expansion. COLLECTIONS-sourced packages have no
+  // merchant-picked variant to respect, so every variant of every product
+  // in the collection is pickable instead.
+  const packageSources = bundle.packages.map((pkg) => {
+    const poolItems = pkg.items.filter((i) => !i.isGift);
+    if (poolItems.length > 0) {
+      return {
+        kind: "variants" as const,
+        variantIds: poolItems.map((i) => i.variantId).filter((id): id is string => Boolean(id)),
+      };
+    }
+    return { kind: "collection" as const, collectionIds: JSON.parse(pkg.collectionIds) as string[] };
+  });
+
   const productIdsByPackage = await Promise.all(
-    bundle.packages.map(async (pkg) => {
-      const poolItems = pkg.items.filter((i) => !i.isGift);
-      if (poolItems.length > 0) return poolItems.map((i) => i.productId);
-      return resolveCollectionProductIds(admin, JSON.parse(pkg.collectionIds) as string[]);
-    }),
+    packageSources.map((source) =>
+      source.kind === "collection"
+        ? resolveCollectionProductIds(admin, source.collectionIds)
+        : Promise.resolve([] as string[]),
+    ),
   );
 
+  const allVariantIds = Array.from(
+    new Set(packageSources.flatMap((source) => (source.kind === "variants" ? source.variantIds : []))),
+  );
   const allProductIds = Array.from(new Set(productIdsByPackage.flat()));
-  const poolDisplayItems = await fetchProductPoolItems(admin, allProductIds, bundle.itemSubtextTemplate);
-  const productById = new Map(poolDisplayItems.map((item) => [item.productId, item]));
+
+  const [variantItems, productItems] = await Promise.all([
+    fetchVariantPoolItems(admin, allVariantIds, bundle.itemSubtextTemplate),
+    fetchProductPoolItems(admin, allProductIds, bundle.itemSubtextTemplate),
+  ]);
+
+  const variantItemById = new Map(variantItems.map((item) => [item.variantId, item]));
+  // Every variant of a COLLECTIONS pool product is pickable, so a product
+  // can contribute more than one item here — group instead of a 1:1 map.
+  const productItemsByProductId = new Map<string, typeof productItems>();
+  for (const item of productItems) {
+    const existing = productItemsByProductId.get(item.productId);
+    if (existing) existing.push(item);
+    else productItemsByProductId.set(item.productId, [item]);
+  }
 
   return json(
     {
       id: bundle.id,
-      packages: bundle.packages.map((pkg, index) => ({
-        variantId: pkg.shopifyVariantId,
-        items: productIdsByPackage[index]
-          .map((id) => productById.get(id))
-          .filter((item): item is NonNullable<typeof item> => Boolean(item)),
-      })),
+      packages: bundle.packages.map((pkg, index) => {
+        const source = packageSources[index];
+        const items =
+          source.kind === "variants"
+            ? source.variantIds
+                .map((id) => variantItemById.get(id))
+                .filter((item): item is NonNullable<typeof item> => Boolean(item))
+            : productIdsByPackage[index].flatMap((id) => productItemsByProductId.get(id) ?? []);
+        return { variantId: pkg.shopifyVariantId, items };
+      }),
     },
     {
       headers: { "Cache-Control": "public, max-age=60" },
