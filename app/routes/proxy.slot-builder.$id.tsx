@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { getBundle } from "../models/bundle.server";
 import { fetchProductPoolItems, resolveCollectionProductIds } from "../models/shopify-sync.server";
@@ -17,12 +17,12 @@ import { fetchProductPoolItems, resolveCollectionProductIds } from "../models/sh
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.public.appProxy(request);
   if (!admin || !session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+    return json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const bundle = await getBundle(session.shop, params.id!);
   if (!bundle || bundle.status !== "ACTIVE" || bundle.type !== "SLOT_BUILDER") {
-    return Response.json({ error: "Bundle not found" }, { status: 404 });
+    return json({ error: "Bundle not found" }, { status: 404 });
   }
 
   const productIdsByPackage = await Promise.all(
@@ -37,7 +37,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const poolDisplayItems = await fetchProductPoolItems(admin, allProductIds, bundle.itemSubtextTemplate);
   const productById = new Map(poolDisplayItems.map((item) => [item.productId, item]));
 
-  return Response.json(
+  return json(
     {
       id: bundle.id,
       packages: bundle.packages.map((pkg, index) => ({

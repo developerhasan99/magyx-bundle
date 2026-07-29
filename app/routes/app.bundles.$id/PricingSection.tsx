@@ -1,4 +1,5 @@
 import { BlockStack, Text, ChoiceList, TextField, Box, InlineStack, Divider } from "@shopify/polaris";
+import { currencySymbol, formatMoney } from "../../utils/money";
 import type { ItemState } from "./types";
 
 // Shared pricing controls (fixed price / percent off / amount off) plus the
@@ -8,6 +9,7 @@ import type { ItemState } from "./types";
 // type choice entirely.
 export function PricingSection({
   type,
+  shopCurrency,
   activePricingType,
   activePricingValue,
   onPricingTypeChange,
@@ -20,6 +22,7 @@ export function PricingSection({
   hasMissingPrices,
 }: {
   type: string;
+  shopCurrency: string;
   activePricingType: string;
   activePricingValue: string;
   onPricingTypeChange: (value: string) => void;
@@ -66,7 +69,7 @@ export function PricingSection({
           value={activePricingValue}
           onChange={onPricingValueChange}
           autoComplete="off"
-          prefix={activePricingType === "PERCENT_OFF" ? undefined : "$"}
+          prefix={activePricingType === "PERCENT_OFF" ? undefined : currencySymbol(shopCurrency)}
           suffix={activePricingType === "PERCENT_OFF" ? "%" : undefined}
           error={pricingValueError}
         />
@@ -86,7 +89,7 @@ export function PricingSection({
                   savings > 0 ? "line-through" : undefined
                 }
               >
-                ${combinedPrice.toFixed(2)}
+                {formatMoney(combinedPrice, shopCurrency)}
               </Text>
             </InlineStack>
             <InlineStack align="space-between" blockAlign="center">
@@ -94,7 +97,7 @@ export function PricingSection({
                 Bundle price
               </Text>
               <Text as="span" variant="bodyMd" fontWeight="semibold">
-                ${computedBundlePrice.toFixed(2)}
+                {formatMoney(computedBundlePrice, shopCurrency)}
               </Text>
             </InlineStack>
             <Divider />
@@ -108,7 +111,7 @@ export function PricingSection({
                 fontWeight="semibold"
                 tone={savings > 0 ? "success" : "subdued"}
               >
-                ${Math.max(0, savings).toFixed(2)}
+                {formatMoney(Math.max(0, savings), shopCurrency)}
                 {savings > 0 && combinedPrice > 0
                   ? ` (${Math.round((savings / combinedPrice) * 100)}%)`
                   : ""}
@@ -117,8 +120,8 @@ export function PricingSection({
             {savings > 0 ? (
               <Text as="p" variant="bodySm" tone="subdued">
                 {type === "SLOT_BUILDER"
-                  ? `The original $${combinedPrice.toFixed(2)} price — the pool's average item price times the slot count — is set as the compare-at (strikethrough) price on the bundle product.`
-                  : `The original $${combinedPrice.toFixed(2)} combined price is set as the compare-at (strikethrough) price on the bundle product.`}
+                  ? `The original ${formatMoney(combinedPrice, shopCurrency)} price — the pool's average item price times the slot count — is set as the compare-at (strikethrough) price on the bundle product.`
+                  : `The original ${formatMoney(combinedPrice, shopCurrency)} combined price is set as the compare-at (strikethrough) price on the bundle product.`}
               </Text>
             ) : (
               <Text as="p" variant="bodySm" tone="caution">

@@ -12,6 +12,7 @@ import {
 } from "@shopify/polaris";
 import { DeleteIcon, ImageIcon, PlusIcon } from "@shopify/polaris-icons";
 import { BundleTypeCard } from "../../components/BundleTypeCard";
+import { formatMoney } from "../../utils/money";
 import { QUANTITY_BREAK_SCOPE_OPTIONS, type CollectionState, type ItemState } from "./types";
 
 // Shared product/collection pool block — reused by FIXED ("Products in
@@ -19,6 +20,7 @@ import { QUANTITY_BREAK_SCOPE_OPTIONS, type CollectionState, type ItemState } fr
 // ("Applies to"), with per-type text/choices.
 export function ProductsSection({
   type,
+  shopCurrency,
   poolSource,
   setPoolSource,
   showCollectionPool,
@@ -31,6 +33,7 @@ export function ProductsSection({
   openCollectionPicker,
 }: {
   type: string;
+  shopCurrency: string;
   poolSource: string;
   setPoolSource: (value: string) => void;
   showCollectionPool: boolean;
@@ -194,9 +197,9 @@ export function ProductsSection({
                     </InlineStack>
                     {item.price != null && (
                       <Text as="span" variant="bodySm" tone="subdued">
-                        ${item.price.toFixed(2)}
+                        {formatMoney(item.price, shopCurrency)}
                         {type === "FIXED" && item.quantity > 1
-                          ? ` × ${item.quantity} = $${(item.price * item.quantity).toFixed(2)}`
+                          ? ` × ${item.quantity} = ${formatMoney(item.price * item.quantity, shopCurrency)}`
                           : ""}
                       </Text>
                     )}

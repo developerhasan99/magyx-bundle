@@ -19,6 +19,7 @@ import {
 import { PlusIcon } from "@shopify/polaris-icons";
 import { SaveBar, TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../../shopify.server";
+import { currencySymbol } from "../../utils/money";
 import {
   createBundle,
   deleteBundle,
@@ -54,6 +55,23 @@ const CREATABLE_BUNDLE_TYPES = ["FIXED", "SLOT_BUILDER", "MIX_MATCH", "QUANTITY_
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
+
+  // Used to format every price shown in this editor — merchants on
+  // non-USD stores were seeing a hardcoded "$" regardless of their actual
+  // currency. Soft-fails to USD so a lookup hiccup doesn't block the page.
+  let shopCurrency = "USD";
+  try {
+    const shopResponse = await admin.graphql(
+      `#graphql
+      query bundleEditorShopCurrency {
+        shop { currencyCode }
+      }`,
+    );
+    shopCurrency = (await shopResponse.json()).data?.shop?.currencyCode ?? "USD";
+  } catch (error) {
+    console.warn("Magyx Bundle: could not load shop currency", error);
+  }
+
   if (params.id === "new") {
     // Set by the /app/bundles/create type picker so this editor opens with
     // the chosen type pre-selected instead of always defaulting to FIXED.
@@ -61,6 +79,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     return {
       bundle: null,
       shopifyProduct: null,
+      shopCurrency,
       requestedType: CREATABLE_BUNDLE_TYPES.includes(requestedType ?? "")
         ? (requestedType as "FIXED" | "SLOT_BUILDER" | "MIX_MATCH" | "QUANTITY_BREAKS")
         : null,
@@ -200,6 +219,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   return {
     shopifyProduct,
+    shopCurrency,
     requestedType: null,
     bundle: {
       id: bundle.id,
@@ -626,7 +646,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
 }
 
 export default function BundleBuilder() {
-  const { bundle, shopifyProduct, requestedType } = useLoaderData<typeof loader>();
+  const { bundle, shopifyProduct, shopCurrency, requestedType } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const deleteFetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
@@ -1282,6 +1302,7 @@ export default function BundleBuilder() {
         : undefined;
   const savings = Math.round((combinedPrice - computedBundlePrice) * 100) / 100;
 
+  const currencySymbolText = useMemo(() => currencySymbol(shopCurrency), [shopCurrency]);
   const previewSummary = useMemo(() => {
     if (type === "QUANTITY_BREAKS") {
       const valid = qbTiers.filter((t) => t.quantity);
@@ -1294,25 +1315,29 @@ export default function BundleBuilder() {
             t.pricingType === "PERCENT_OFF"
               ? `${t.pricingValue}% off`
               : t.pricingType === "AMOUNT_OFF"
-                ? `$${t.pricingValue} off`
-                : `$${t.pricingValue} each`;
+                ? `${currencySymbolText}${t.pricingValue} off`
+                : `${currencySymbolText}${t.pricingValue} each`;
           return `${label} — ${priced}`;
         })
         .join(" · ");
     }
     if (type !== "MIX_MATCH") {
       if (activePricingType === "FIXED_PRICE")
-        return activePricingValue ? `Bundle price: $${activePricingValue}` : "Set a bundle price";
+        return activePricingValue
+          ? `Bundle price: ${currencySymbolText}${activePricingValue}`
+          : "Set a bundle price";
       if (activePricingType === "PERCENT_OFF")
         return activePricingValue ? `${activePricingValue}% off combined price` : "Set a discount";
-      return activePricingValue ? `$${activePricingValue} off combined price` : "Set a discount";
+      return activePricingValue
+        ? `${currencySymbolText}${activePricingValue} off combined price`
+        : "Set a discount";
     }
     const valid = tiers.filter((t) => t.quantity && t.discount);
     if (valid.length === 0) return "Add discount tiers";
     return valid
       .map((t) => `Buy ${t.quantity}+ → ${t.discount}% off`)
       .join(" · ");
-  }, [type, activePricingType, activePricingValue, tiers, qbTiers]);
+  }, [type, activePricingType, activePricingValue, tiers, qbTiers, currencySymbolText]);
 
   const showCollectionPool = type !== "FIXED" && activePoolSource === "COLLECTIONS";
   // QUANTITY_BREAKS only — every other type only ever has PRODUCTS/COLLECTIONS
@@ -1421,6 +1446,7 @@ export default function BundleBuilder() {
                     <Divider />
                     <ProductsSection
                       type={type}
+                      shopCurrency={shopCurrency}
                       poolSource={poolSource}
                       setPoolSource={setPoolSource}
                       showCollectionPool={showCollectionPool}
@@ -1445,6 +1471,7 @@ export default function BundleBuilder() {
                     <Divider />
                     <PricingSection
                       type={type}
+                      shopCurrency={shopCurrency}
                       activePricingType={activePricingType}
                       activePricingValue={activePricingValue}
                       onPricingTypeChange={(value) =>
@@ -1487,6 +1514,7 @@ export default function BundleBuilder() {
                     <Divider />
                     <ProductsSection
                       type={type}
+                      shopCurrency={shopCurrency}
                       poolSource={activePoolSource}
                       setPoolSource={setActivePoolSource}
                       showCollectionPool={showCollectionPool}
@@ -1528,6 +1556,7 @@ export default function BundleBuilder() {
                     <Divider />
                     <PricingSection
                       type={type}
+                      shopCurrency={shopCurrency}
                       activePricingType={activePricingType}
                       activePricingValue={activePricingValue}
                       onPricingTypeChange={(value) =>
@@ -1550,6 +1579,7 @@ export default function BundleBuilder() {
                   <Card>
                     <ProductsSection
                       type={type}
+                      shopCurrency={shopCurrency}
                       poolSource={poolSource}
                       setPoolSource={setPoolSource}
                       showCollectionPool={showCollectionPool}
@@ -1567,6 +1597,7 @@ export default function BundleBuilder() {
                     <>
                       <Card>
                         <QuantityBreaksTiersSection
+                          shopCurrency={shopCurrency}
                           qbTiers={qbTiers}
                           activeQbTierIndex={activeQbTierIndex}
                           setActiveQbTierIndex={setActiveQbTierIndex}
@@ -1626,6 +1657,7 @@ export default function BundleBuilder() {
           <Layout.Section variant="oneThird">
             <PreviewSidebar
               type={type}
+              shopCurrency={shopCurrency}
               title={title}
               description={description}
               status={status}

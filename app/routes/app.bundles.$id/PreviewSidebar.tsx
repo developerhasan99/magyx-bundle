@@ -12,6 +12,7 @@ import {
   Button,
 } from "@shopify/polaris";
 import { ImageIcon, EditIcon } from "@shopify/polaris-icons";
+import { formatMoney } from "../../utils/money";
 import type { CollectionState, ItemState } from "./types";
 
 interface ShopifyProductPreview {
@@ -25,6 +26,7 @@ interface ShopifyProductPreview {
 // The right-column "Preview" + "Publishing" cards.
 export function PreviewSidebar({
   type,
+  shopCurrency,
   title,
   description,
   status,
@@ -46,6 +48,7 @@ export function PreviewSidebar({
   onCopyBundleId,
 }: {
   type: string;
+  shopCurrency: string;
   title: string;
   description: string;
   status: string;
@@ -263,7 +266,7 @@ export function PreviewSidebar({
                           </Badge>
                           {shopifyProduct.price && (
                             <Text as="span" variant="bodySm" tone="subdued">
-                              ${shopifyProduct.price}
+                              {formatMoney(parseFloat(shopifyProduct.price), shopCurrency)}
                             </Text>
                           )}
                         </InlineStack>

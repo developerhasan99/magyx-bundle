@@ -13,7 +13,7 @@ import {
 import { DeleteIcon, ImageIcon, PlusIcon } from "@shopify/polaris-icons";
 import type { ItemState } from "./types";
 
-// FIXED bundles only: free gifts always included at $0.
+// FIXED bundles only: free gifts always included at no extra cost.
 export function GiftsSection({
   giftItems,
   setActiveItems,
@@ -38,7 +38,7 @@ export function GiftsSection({
         </Button>
       </InlineStack>
       <Text as="p" variant="bodySm" tone="subdued">
-        Optional. These products are always included at $0
+        Optional. These products are always included at no extra cost
         alongside the bundle — they don&apos;t affect its price.
       </Text>
       <Checkbox

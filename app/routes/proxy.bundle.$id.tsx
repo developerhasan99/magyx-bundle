@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json as jsonResponse, type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { getBundle } from "../models/bundle.server";
 
@@ -11,12 +11,12 @@ import { getBundle } from "../models/bundle.server";
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.public.appProxy(request);
   if (!admin || !session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+    return jsonResponse({ error: "Unauthorized" }, { status: 401 });
   }
 
   const bundle = await getBundle(session.shop, params.id!);
   if (!bundle || bundle.status !== "ACTIVE" || bundle.type !== "MIX_MATCH") {
-    return Response.json({ error: "Bundle not found" }, { status: 404 });
+    return jsonResponse({ error: "Bundle not found" }, { status: 404 });
   }
 
   const productIds = bundle.items.map((i) => i.productId);
@@ -56,7 +56,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     })
     .filter(Boolean);
 
-  return Response.json(
+  return jsonResponse(
     {
       id: bundle.id,
       title: bundle.title,

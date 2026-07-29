@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json as jsonResponse, type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { getActiveQuantityBreakBundles } from "../models/bundle.server";
 
@@ -18,7 +18,7 @@ import { getActiveQuantityBreakBundles } from "../models/bundle.server";
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.public.appProxy(request);
   if (!admin || !session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+    return jsonResponse({ error: "Unauthorized" }, { status: 401 });
   }
 
   const productGid = `gid://shopify/Product/${params.productId}`;
@@ -63,7 +63,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }
 
   if (!bundle) {
-    return Response.json({ error: "Not found" }, { status: 404 });
+    return jsonResponse({ error: "Not found" }, { status: 404 });
   }
 
   const response = await admin.graphql(
@@ -92,7 +92,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const json = await response.json();
   const product = json.data?.product;
   if (!product) {
-    return Response.json({ error: "Not found" }, { status: 404 });
+    return jsonResponse({ error: "Not found" }, { status: 404 });
   }
 
   const variants = (product.variants?.edges ?? []).map(
@@ -117,7 +117,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     }),
   );
 
-  return Response.json(
+  return jsonResponse(
     {
       bundleId: bundle.id,
       heading: bundle.widgetHeading,

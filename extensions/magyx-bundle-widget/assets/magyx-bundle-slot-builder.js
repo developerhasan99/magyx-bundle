@@ -535,7 +535,11 @@
         }
         var visibleItems = searchText
           ? poolItems.filter(function (item) {
-              return item.title.toLowerCase().indexOf(searchText) !== -1;
+              return (
+                item.title.toLowerCase().indexOf(searchText) !== -1 ||
+                (item.subtext &&
+                  item.subtext.toLowerCase().indexOf(searchText) !== -1)
+              );
             })
           : poolItems;
         if (visibleItems.length === 0) {

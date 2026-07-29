@@ -13,11 +13,13 @@ import {
 } from "@shopify/polaris";
 import { DeleteIcon, ImageIcon, PlusIcon } from "@shopify/polaris-icons";
 import { PackageTab } from "./PackageTab";
+import { currencySymbol } from "../../utils/money";
 import { BADGE_TONE_OPTIONS, type QbTierState } from "./types";
 
 // QUANTITY_BREAKS only: pack-size tabs + detail fields + per-tier free gifts
 // for whichever tab is active.
 export function QuantityBreaksTiersSection({
+  shopCurrency,
   qbTiers,
   activeQbTierIndex,
   setActiveQbTierIndex,
@@ -28,6 +30,7 @@ export function QuantityBreaksTiersSection({
   openQbTierGiftPicker,
   removeQbTierItem,
 }: {
+  shopCurrency: string;
   qbTiers: QbTierState[];
   activeQbTierIndex: number;
   setActiveQbTierIndex: (index: number) => void;
@@ -135,7 +138,7 @@ export function QuantityBreaksTiersSection({
               value={activeQbTier.pricingValue}
               onChange={(value) => updateQbTier(activeQbTier.tempKey, { pricingValue: value })}
               autoComplete="off"
-              prefix={activeQbTier.pricingType === "PERCENT_OFF" ? undefined : "$"}
+              prefix={activeQbTier.pricingType === "PERCENT_OFF" ? undefined : currencySymbol(shopCurrency)}
               suffix={activeQbTier.pricingType === "PERCENT_OFF" ? "%" : undefined}
             />
           </InlineGrid>
