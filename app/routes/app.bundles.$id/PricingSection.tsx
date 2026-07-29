@@ -2,11 +2,13 @@ import { BlockStack, Text, ChoiceList, TextField, Box, InlineStack, Divider } fr
 import { currencySymbol, formatMoney } from "../../utils/money";
 import type { ItemState } from "./types";
 
-// Shared pricing controls (fixed price / percent off / amount off) plus the
-// FIXED-only compare-at math box. SLOT_BUILDER is fixed-price only (a
-// customer's slot picks aren't known until checkout, so there's no
-// trustworthy "combined price" to discount off of) — it skips the pricing
-// type choice entirely.
+// Shared pricing controls (fixed price / percent off / amount off). SLOT_
+// BUILDER is fixed-price only (a customer's slot picks aren't known until
+// checkout, so there's no trustworthy "combined price" to discount off of)
+// — it skips the pricing type choice entirely. The compare-at math box lives
+// in the separate PricingSummaryBox below, so a caller that lays this out
+// in a multi-column grid (e.g. side-by-side with Slots) can still render
+// that box full-width underneath instead of squeezed into one column.
 export function PricingSection({
   type,
   shopCurrency,
@@ -15,11 +17,6 @@ export function PricingSection({
   onPricingTypeChange,
   onPricingValueChange,
   pricingValueError,
-  paidItems,
-  combinedPrice,
-  computedBundlePrice,
-  savings,
-  hasMissingPrices,
 }: {
   type: string;
   shopCurrency: string;
@@ -28,11 +25,6 @@ export function PricingSection({
   onPricingTypeChange: (value: string) => void;
   onPricingValueChange: (value: string) => void;
   pricingValueError: string | undefined;
-  paidItems: ItemState[];
-  combinedPrice: number;
-  computedBundlePrice: number;
-  savings: number;
-  hasMissingPrices: boolean;
 }) {
   return (
     <BlockStack gap="400">
@@ -52,7 +44,6 @@ export function PricingSection({
           onChange={(value) => onPricingTypeChange(value[0])}
         />
       )}
-      <div style={{ maxWidth: 200 }}>
         <TextField
           label={
             type === "SLOT_BUILDER"
@@ -72,73 +63,101 @@ export function PricingSection({
           prefix={activePricingType === "PERCENT_OFF" ? undefined : currencySymbol(shopCurrency)}
           suffix={activePricingType === "PERCENT_OFF" ? "%" : undefined}
           error={pricingValueError}
+          helpText={
+            type === "SLOT_BUILDER"
+              ? "Customers pay this flat price no matter which products they pick."
+              : undefined
+          }
         />
-      </div>
-      {(type === "FIXED" || type === "SLOT_BUILDER") && paidItems.length > 0 && (
-        <Box background="bg-surface-secondary" borderRadius="200" padding="300">
-          <BlockStack gap="200">
-            <InlineStack align="space-between" blockAlign="center">
-              <Text as="span" variant="bodyMd" tone="subdued">
-                Original price (compare-at)
-              </Text>
-              <Text
-                as="span"
-                variant="bodyMd"
-                tone="subdued"
-                textDecorationLine={
-                  savings > 0 ? "line-through" : undefined
-                }
-              >
-                {formatMoney(combinedPrice, shopCurrency)}
-              </Text>
-            </InlineStack>
-            <InlineStack align="space-between" blockAlign="center">
-              <Text as="span" variant="bodyMd">
-                Bundle price
-              </Text>
-              <Text as="span" variant="bodyMd" fontWeight="semibold">
-                {formatMoney(computedBundlePrice, shopCurrency)}
-              </Text>
-            </InlineStack>
-            <Divider />
-            <InlineStack align="space-between" blockAlign="center">
-              <Text as="span" variant="bodyMd" fontWeight="semibold">
-                Customer saves
-              </Text>
-              <Text
-                as="span"
-                variant="bodyMd"
-                fontWeight="semibold"
-                tone={savings > 0 ? "success" : "subdued"}
-              >
-                {formatMoney(Math.max(0, savings), shopCurrency)}
-                {savings > 0 && combinedPrice > 0
-                  ? ` (${Math.round((savings / combinedPrice) * 100)}%)`
-                  : ""}
-              </Text>
-            </InlineStack>
-            {savings > 0 ? (
-              <Text as="p" variant="bodySm" tone="subdued">
-                {type === "SLOT_BUILDER"
-                  ? `The original ${formatMoney(combinedPrice, shopCurrency)} price — the pool's average item price times the slot count — is set as the compare-at (strikethrough) price on the bundle product.`
-                  : `The original ${formatMoney(combinedPrice, shopCurrency)} combined price is set as the compare-at (strikethrough) price on the bundle product.`}
-              </Text>
-            ) : (
-              <Text as="p" variant="bodySm" tone="caution">
-                {type === "SLOT_BUILDER"
-                  ? "The bundle price isn't below the pool's average price for this many slots, so no compare-at price will be shown to customers."
-                  : "The bundle price isn't below the combined price of its products, so no compare-at price will be shown to customers."}
-              </Text>
-            )}
-            {hasMissingPrices && (
-              <Text as="p" variant="bodySm" tone="caution">
-                Some product prices couldn&apos;t be loaded, so
-                these totals may be incomplete.
-              </Text>
-            )}
-          </BlockStack>
-        </Box>
-      )}
     </BlockStack>
+  );
+}
+
+// The compare-at math box (original/bundle/savings) — split out from
+// PricingSection so a caller laying that out in a multi-column grid (e.g.
+// side-by-side with Slots) can still render this full-width underneath
+// instead of squeezed into one column.
+export function PricingSummaryBox({
+  type,
+  shopCurrency,
+  paidItems,
+  combinedPrice,
+  computedBundlePrice,
+  savings,
+  hasMissingPrices,
+}: {
+  type: string;
+  shopCurrency: string;
+  paidItems: ItemState[];
+  combinedPrice: number;
+  computedBundlePrice: number;
+  savings: number;
+  hasMissingPrices: boolean;
+}) {
+  if (!(type === "FIXED" || type === "SLOT_BUILDER") || paidItems.length === 0) return null;
+  return (
+    <Box background="bg-surface-secondary" borderRadius="200" padding="300">
+      <BlockStack gap="200">
+        <InlineStack align="space-between" blockAlign="center">
+          <Text as="span" variant="bodyMd" tone="subdued">
+            Original price (compare-at)
+          </Text>
+          <Text
+            as="span"
+            variant="bodyMd"
+            tone="subdued"
+            textDecorationLine={
+              savings > 0 ? "line-through" : undefined
+            }
+          >
+            {formatMoney(combinedPrice, shopCurrency)}
+          </Text>
+        </InlineStack>
+        <InlineStack align="space-between" blockAlign="center">
+          <Text as="span" variant="bodyMd">
+            Bundle price
+          </Text>
+          <Text as="span" variant="bodyMd" fontWeight="semibold">
+            {formatMoney(computedBundlePrice, shopCurrency)}
+          </Text>
+        </InlineStack>
+        <Divider />
+        <InlineStack align="space-between" blockAlign="center">
+          <Text as="span" variant="bodyMd" fontWeight="semibold">
+            Customer saves
+          </Text>
+          <Text
+            as="span"
+            variant="bodyMd"
+            fontWeight="semibold"
+            tone={savings > 0 ? "success" : "subdued"}
+          >
+            {formatMoney(Math.max(0, savings), shopCurrency)}
+            {savings > 0 && combinedPrice > 0
+              ? ` (${Math.round((savings / combinedPrice) * 100)}%)`
+              : ""}
+          </Text>
+        </InlineStack>
+        {savings > 0 ? (
+          <Text as="p" variant="bodySm" tone="subdued">
+            {type === "SLOT_BUILDER"
+              ? `The original ${formatMoney(combinedPrice, shopCurrency)} price — the pool's average item price times the slot count — is set as the compare-at (strikethrough) price on the bundle product.`
+              : `The original ${formatMoney(combinedPrice, shopCurrency)} combined price is set as the compare-at (strikethrough) price on the bundle product.`}
+          </Text>
+        ) : (
+          <Text as="p" variant="bodySm" tone="caution">
+            {type === "SLOT_BUILDER"
+              ? "The bundle price isn't below the pool's average price for this many slots, so no compare-at price will be shown to customers."
+              : "The bundle price isn't below the combined price of its products, so no compare-at price will be shown to customers."}
+          </Text>
+        )}
+        {hasMissingPrices && (
+          <Text as="p" variant="bodySm" tone="caution">
+            Some product prices couldn&apos;t be loaded, so
+            these totals may be incomplete.
+          </Text>
+        )}
+      </BlockStack>
+    </Box>
   );
 }

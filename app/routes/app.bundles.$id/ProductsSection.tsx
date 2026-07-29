@@ -3,7 +3,6 @@ import {
   InlineStack,
   Text,
   Button,
-  ChoiceList,
   Box,
   Divider,
   Thumbnail,
@@ -14,6 +13,7 @@ import { DeleteIcon, ImageIcon, PlusIcon } from "@shopify/polaris-icons";
 import { BundleTypeCard } from "../../components/BundleTypeCard";
 import { formatMoney } from "../../utils/money";
 import {
+  POOL_SOURCE_OPTIONS,
   QUANTITY_BREAK_SCOPE_OPTIONS,
   type CollectionState,
   type ItemState,
@@ -33,6 +33,10 @@ export function ProductsSection({
   collections,
   setCollections,
   collectionPoolItems,
+  variantFilter,
+  setVariantFilter,
+  onResolveProducts,
+  isResolvingPool,
   paidItems,
   setActiveItems,
   openResourcePicker,
@@ -47,6 +51,12 @@ export function ProductsSection({
   collections: CollectionState[];
   setCollections: (updater: (current: CollectionState[]) => CollectionState[]) => void;
   collectionPoolItems: ResolvedPoolItem[];
+  // SLOT_BUILDER only — undefined for MIX_MATCH/QUANTITY_BREAKS, which don't
+  // offer this filter (or the resolve button) yet.
+  variantFilter?: string;
+  setVariantFilter?: (value: string) => void;
+  onResolveProducts?: () => void;
+  isResolvingPool?: boolean;
   paidItems: ItemState[];
   setActiveItems: (updater: (current: ItemState[]) => ItemState[]) => void;
   openResourcePicker: (isGiftFlag: boolean) => void;
@@ -60,7 +70,7 @@ export function ProductsSection({
             ? "Products in bundle"
             : type === "QUANTITY_BREAKS"
               ? "Applies to"
-              : "Product pool"}
+              : "Product pool — customers pick from"}
         </Text>
         {!showAllProductsNotice &&
           (showCollectionPool ? (
@@ -94,24 +104,24 @@ export function ProductsSection({
         </div>
       ) : (
         type !== "FIXED" && (
-          <ChoiceList
-            title="Customers pick from"
-            choices={[
-              {
-                label: "Specific products",
-                value: "PRODUCTS",
-                helpText: "Hand-pick the products shown in the selection panel.",
-              },
-              {
-                label: "Collections",
-                value: "COLLECTIONS",
-                helpText:
-                  "Show every product from the chosen collections — stays up to date automatically.",
-              },
-            ]}
-            selected={[poolSource]}
-            onChange={(value) => setPoolSource(value[0])}
-          />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: "var(--p-space-300)",
+            }}
+          >
+            {POOL_SOURCE_OPTIONS.map((option) => (
+              <BundleTypeCard
+                key={option.value}
+                label={option.label}
+                description={option.helpText}
+                selected={poolSource === option.value}
+                disabled={false}
+                onSelect={() => setPoolSource(option.value)}
+              />
+            ))}
+          </div>
         )
       )}
       {showAllProductsNotice ? (
@@ -167,6 +177,34 @@ export function ProductsSection({
           </BlockStack>
         )
       ) : null}
+      {showCollectionPool && collections.length > 0 && setVariantFilter && (
+        <BlockStack gap="100">
+          <Text as="p" variant="bodyMd">
+            Only include variants whose title contains
+          </Text>
+          <InlineStack gap="200" blockAlign="stretch" wrap={false}>
+            <div style={{ flex: 1 }}>
+              <TextField
+                label="Only include variants whose title contains"
+                labelHidden
+                value={variantFilter ?? ""}
+                onChange={setVariantFilter}
+                autoComplete="off"
+                placeholder="e.g. 50ml, Large"
+                clearButton
+                onClearButtonClick={() => setVariantFilter("")}
+              />
+            </div>
+            <Button onClick={onResolveProducts} loading={isResolvingPool}>
+              Resolve products
+            </Button>
+          </InlineStack>
+          <Text as="p" variant="bodySm" tone="subdued">
+            Leave blank to include every variant. Matches anywhere in the
+            variant title, not case-sensitive — e.g. "50" matches "50ml".
+          </Text>
+        </BlockStack>
+      )}
       {showCollectionPool && collections.length > 0 && (
         <BlockStack gap="300">
           <Divider />

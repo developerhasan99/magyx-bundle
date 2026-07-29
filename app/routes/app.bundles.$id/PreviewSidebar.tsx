@@ -139,31 +139,11 @@ export function PreviewSidebar({
                 )}
               </>
             ) : (
-              <>
-                {activeItems.slice(0, 5).map((item) => (
-                  <InlineStack key={item.productId} gap="200" blockAlign="center" wrap={false}>
-                    <Thumbnail
-                      source={item.productImageUrl || ImageIcon}
-                      alt={item.productTitle}
-                      size="extraSmall"
-                    />
-                    <Text as="span" variant="bodySm" truncate>
-                      {type === "FIXED" ? `${item.quantity} × ` : ""}
-                      {item.productTitle}
-                    </Text>
-                  </InlineStack>
-                ))}
-                {activeItems.length > 5 && (
-                  <Text as="span" variant="bodySm" tone="subdued">
-                    +{activeItems.length - 5} more
-                  </Text>
-                )}
-                {activeItems.length === 0 && (
-                  <Text as="span" variant="bodySm" tone="subdued">
-                    No products yet
-                  </Text>
-                )}
-              </>
+              <Text as="span" variant="bodySm" tone="subdued">
+                {activeItems.length === 0
+                  ? "No products yet"
+                  : `${activeItems.length} product${activeItems.length === 1 ? "" : "s"} selected`}
+              </Text>
             )}
           </BlockStack>
           <Divider />

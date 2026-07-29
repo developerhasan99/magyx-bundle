@@ -77,12 +77,22 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       id: bundle.id,
       packages: bundle.packages.map((pkg, index) => {
         const source = packageSources[index];
-        const items =
-          source.kind === "variants"
-            ? source.variantIds
-                .map((id) => variantItemById.get(id))
-                .filter((item): item is NonNullable<typeof item> => Boolean(item))
-            : productIdsByPackage[index].flatMap((id) => productItemsByProductId.get(id) ?? []);
+        if (source.kind === "variants") {
+          const items = source.variantIds
+            .map((id) => variantItemById.get(id))
+            .filter((item): item is NonNullable<typeof item> => Boolean(item));
+          return { variantId: pkg.shopifyVariantId, items };
+        }
+        // The GraphQL fetch above is batched across every COLLECTIONS
+        // package for efficiency, so each package's own variantFilter has to
+        // be applied here, per-package, rather than inside that shared call.
+        const allVariants = productIdsByPackage[index].flatMap(
+          (id) => productItemsByProductId.get(id) ?? [],
+        );
+        const filter = pkg.variantFilter.trim().toLowerCase();
+        const items = filter
+          ? allVariants.filter((item) => item.variantTitle.toLowerCase().includes(filter))
+          : allVariants;
         return { variantId: pkg.shopifyVariantId, items };
       }),
     },

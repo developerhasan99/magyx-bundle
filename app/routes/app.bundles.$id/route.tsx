@@ -8,6 +8,7 @@ import {
   Card,
   BlockStack,
   InlineStack,
+  InlineGrid,
   Text,
   TextField,
   Button,
@@ -46,7 +47,7 @@ import {
 } from "./types";
 import { ProductsSection } from "./ProductsSection";
 import { GiftsSection } from "./GiftsSection";
-import { PricingSection } from "./PricingSection";
+import { PricingSection, PricingSummaryBox } from "./PricingSection";
 import { PackagesTabsSection } from "./PackagesTabsSection";
 import { QuantityBreaksTiersSection } from "./QuantityBreaksTiersSection";
 import { QuantityBreaksWidgetSection } from "./QuantityBreaksWidgetSection";
@@ -227,11 +228,19 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // SLOT_BUILDER. Uncapped by design: a merchant should never have a pool
   // silently truncated in the editor. Soft-fails per collection so one bad
   // lookup doesn't blank out every preview.
-  const resolveCollectionPoolItems = async (ids: string[]): Promise<ResolvedPoolItem[]> => {
+  const resolveCollectionPoolItems = async (
+    ids: string[],
+    variantFilter?: string,
+  ): Promise<ResolvedPoolItem[]> => {
     if (ids.length === 0) return [];
     try {
       const productIds = await resolveCollectionProductIds(admin, ids);
-      const items = await fetchProductPoolItems(admin, productIds, bundle.itemSubtextTemplate);
+      const items = await fetchProductPoolItems(
+        admin,
+        productIds,
+        bundle.itemSubtextTemplate,
+        variantFilter,
+      );
       return items.map((item) => ({
         productId: item.productId,
         variantId: item.variantId,
@@ -245,18 +254,15 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       return [];
     }
   };
-  const [collectionPoolItems, packageCollectionPoolItems] = await Promise.all([
+  // SLOT_BUILDER's per-package pool is NOT auto-resolved here — it's
+  // uncapped (a merchant should never have it silently truncated) and can
+  // be a large collection, so the editor resolves it only on demand via the
+  // "Resolve products" button (app.bundles.resolve-pool.tsx) instead of on
+  // every page load.
+  const collectionPoolItems =
     bundle.type !== "FIXED" && bundle.type !== "SLOT_BUILDER"
-      ? resolveCollectionPoolItems(collectionIds)
-      : Promise.resolve([]),
-    Promise.all(
-      bundle.packages.map((p, index) =>
-        bundle.type === "SLOT_BUILDER" && p.poolSource === "COLLECTIONS"
-          ? resolveCollectionPoolItems(packageCollectionIds[index])
-          : Promise.resolve([]),
-      ),
-    ),
-  ]);
+      ? await resolveCollectionPoolItems(collectionIds)
+      : [];
 
   return {
     shopifyProduct,
@@ -302,7 +308,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         poolSource: p.poolSource,
         slotCount: p.slotCount,
         collections: resolveCollections(packageCollectionIds[index]),
-        collectionPoolItems: packageCollectionPoolItems[index],
+        // Not auto-resolved on load — see the comment above collectionPoolItems.
+        collectionPoolItems: [] as ResolvedPoolItem[],
+        variantFilter: p.variantFilter,
         items: p.items.map((i) => ({
           productId: i.productId,
           variantId: i.variantId,
@@ -539,6 +547,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
               .filter((i) => !i.isGift && i.variantId)
               .map((i) => i.variantId!),
             collectionIds: JSON.parse(pkg.collectionIds) as string[],
+            variantFilter: pkg.variantFilter,
             gifts: pkg.items
               .filter((i) => i.isGift && i.variantId)
               .map((i) => ({ variantId: i.variantId!, quantity: i.quantity })),
@@ -622,6 +631,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
               poolSource: p.poolSource ?? "PRODUCTS",
               collections: (p.collections ?? []) as CollectionState[],
               collectionPoolItems: (p.collectionPoolItems ?? []) as ResolvedPoolItem[],
+              variantFilter: p.variantFilter ?? "",
               slotCount: String(p.slotCount ?? 2),
               items: p.items.map(
                 (i): ItemState => ({
@@ -813,6 +823,39 @@ export default function BundleBuilder() {
     type === "SLOT_BUILDER"
       ? (packages[activePackageIndex]?.collectionPoolItems ?? [])
       : collectionPoolItems;
+  // SLOT_BUILDER only — MIX_MATCH/QUANTITY_BREAKS don't offer this filter.
+  const activeVariantFilter = packages[activePackageIndex]?.variantFilter ?? "";
+  const setActiveVariantFilter = useCallback(
+    (value: string) => updateActivePackage({ variantFilter: value }),
+    [updateActivePackage],
+  );
+
+  // Resolving a COLLECTIONS pool is uncapped (see the loader) and can be
+  // slow for a large collection, so it's triggered on demand by the
+  // "Resolve products" button instead of running on every page load.
+  const resolvePoolFetcher = useFetcher<{ items: ResolvedPoolItem[]; error?: string }>();
+  const isResolvingPool = resolvePoolFetcher.state !== "idle";
+  const resolveActivePoolProducts = useCallback(() => {
+    resolvePoolFetcher.submit(
+      {
+        collectionIds: JSON.stringify(activeCollections.map((c) => c.id)),
+        variantFilter: activeVariantFilter,
+        itemSubtextTemplate,
+      },
+      { method: "POST", action: "/app/bundles/resolve-pool" },
+    );
+  }, [resolvePoolFetcher, activeCollections, activeVariantFilter, itemSubtextTemplate]);
+  useEffect(() => {
+    // The action's data arrives while the fetcher is still "loading"
+    // (revalidating), so state must be a dependency too — waiting on data
+    // alone means the idle guard fails once and never re-checks.
+    if (resolvePoolFetcher.data && resolvePoolFetcher.state === "idle") {
+      updateActivePackage({ collectionPoolItems: resolvePoolFetcher.data.items });
+    }
+    // Deliberately omits updateActivePackage so switching package tabs
+    // doesn't re-apply a stale result to the newly active package.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvePoolFetcher.data, resolvePoolFetcher.state]);
   const setActivePoolSource = useCallback(
     (value: string) => {
       if (type === "SLOT_BUILDER") updateActivePackage({ poolSource: value });
@@ -856,18 +899,31 @@ export default function BundleBuilder() {
 
   const isSaving = fetcher.state !== "idle";
 
+  // Per-package collectionPoolItems is live preview data fetched on demand
+  // by the "Resolve products" button, never persisted and always empty in
+  // initialForm (see the loader) — stripped from both sides before
+  // comparing so clicking that button doesn't itself register as an edit.
+  const stripCollectionPoolItems = (pkgs: PackageState[]) =>
+    pkgs.map(({ collectionPoolItems: _collectionPoolItems, ...pkg }) => pkg);
   const isDirty = useMemo(
     () =>
       JSON.stringify({
         title, type, status, pricingType, pricingValue, widgetStyle,
         widgetHeading, accentColor, showPrices, itemSubtextTemplate,
-        showSubtextOnGifts, freeShipping, items, packages, collections, poolSource,
+        showSubtextOnGifts, freeShipping, items,
+        packages: stripCollectionPoolItems(packages),
+        collections, collectionPoolItems, poolSource,
         minItems, maxItems, tiers, qbTiers,
-      }) !== JSON.stringify(initialForm),
+      }) !==
+      JSON.stringify({
+        ...initialForm,
+        packages: stripCollectionPoolItems(initialForm.packages),
+      }),
     [
       initialForm, title, type, status, pricingType, pricingValue,
       widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
-      showSubtextOnGifts, freeShipping, items, packages, collections, poolSource,
+      showSubtextOnGifts, freeShipping, items, packages, collections,
+      collectionPoolItems, poolSource,
       minItems, maxItems, tiers, qbTiers,
     ],
   );
@@ -1043,29 +1099,49 @@ export default function BundleBuilder() {
     // `items` list; SLOT_BUILDER writes into the active package's list
     // instead (via setActiveItems), scoped past its gift entries so re-adding
     // a product already picked as a gift doesn't reuse/overwrite that row.
+    // QUANTITY_BREAKS applies across every variant of the product — never
+    // pin to one, so it stays a single product-level row regardless of which
+    // variants the picker shows as checked. MIX_MATCH/SLOT_BUILDER add
+    // whichever specific variant(s) the merchant checked in the picker —
+    // one pool row per checked variant, not just the first.
     const setter = type === "SLOT_BUILDER" ? setActiveItems : setItems;
     setter((current) => {
       const relevant = type === "SLOT_BUILDER" ? current.filter((i) => !i.isGift) : current;
-      const byProduct = new Map(relevant.map((i) => [i.productId, i]));
-      const newItems = selection.map((product: any) => {
-        const existing = byProduct.get(product.id);
-        if (existing) return existing;
-        // QUANTITY_BREAKS applies across every variant of the product —
-        // never pin to one, unlike MIX_MATCH which adds this specific
-        // variant to the cart when a shopper picks it.
-        const variant = type === "QUANTITY_BREAKS" ? null : (product.variants?.[0] ?? null);
-        const hasRealVariantTitle = variant?.title && variant.title !== "Default Title";
-        return {
-          productId: product.id,
-          variantId: variant?.id ?? null,
-          productTitle: hasRealVariantTitle ? `${product.title} — ${variant.title}` : product.title,
-          productImageUrl:
-            variant?.image?.originalSrc ?? product.images?.[0]?.originalSrc ?? null,
-          quantity: 1,
-          isGift: false,
-          price: toPrice(variant?.price),
-          missing: false,
-        };
+      const byKey = new Map(relevant.map((i) => [i.variantId ?? i.productId, i]));
+      const newItems = selection.flatMap((product: any) => {
+        if (type === "QUANTITY_BREAKS") {
+          const existing = byKey.get(product.id);
+          if (existing) return [existing];
+          return [
+            {
+              productId: product.id,
+              variantId: null,
+              productTitle: product.title,
+              productImageUrl: product.images?.[0]?.originalSrc ?? null,
+              quantity: 1,
+              isGift: false,
+              price: toPrice(product.variants?.[0]?.price),
+              missing: false,
+            },
+          ];
+        }
+        const variants: any[] = product.variants?.length ? product.variants : [null];
+        return variants.map((variant) => {
+          const existing = byKey.get(variant?.id ?? product.id);
+          if (existing) return existing;
+          const hasRealVariantTitle = variant?.title && variant.title !== "Default Title";
+          return {
+            productId: product.id,
+            variantId: variant?.id ?? null,
+            productTitle: hasRealVariantTitle ? `${product.title} — ${variant.title}` : product.title,
+            productImageUrl:
+              variant?.image?.originalSrc ?? product.images?.[0]?.originalSrc ?? null,
+            quantity: 1,
+            isGift: false,
+            price: toPrice(variant?.price),
+            missing: false,
+          };
+        });
       });
       return type === "SLOT_BUILDER" ? [...current.filter((i) => i.isGift), ...newItems] : newItems;
     });
@@ -1281,6 +1357,7 @@ export default function BundleBuilder() {
                 poolSource: type === "SLOT_BUILDER" ? pkg.poolSource : "PRODUCTS",
                 slotCount: type === "SLOT_BUILDER" ? parseInt(pkg.slotCount, 10) || 0 : 0,
                 collectionIds: pkgUsesCollections ? pkg.collections.map((c) => c.id) : [],
+                variantFilter: pkgUsesCollections ? pkg.variantFilter.trim() : "",
                 // Pool items (isGift: false) aren't sent when this package's
                 // pool is collection-sourced — only its free gifts are.
                 items: (pkgUsesCollections ? pkg.items.filter((i) => i.isGift) : pkg.items).map(
@@ -1499,22 +1576,6 @@ export default function BundleBuilder() {
                       removeActivePackage={removeActivePackage}
                     />
                     <Divider />
-                    <ProductsSection
-                      type={type}
-                      shopCurrency={shopCurrency}
-                      poolSource={poolSource}
-                      setPoolSource={setPoolSource}
-                      showCollectionPool={showCollectionPool}
-                      showAllProductsNotice={showAllProductsNotice}
-                      collections={collections}
-                      setCollections={setCollections}
-                      collectionPoolItems={collectionPoolItems}
-                      paidItems={paidItems}
-                      setActiveItems={setActiveItems}
-                      openResourcePicker={openResourcePicker}
-                      openCollectionPicker={openCollectionPicker}
-                    />
-                    <Divider />
                     <GiftsSection
                       giftItems={giftItems}
                       setActiveItems={setActiveItems}
@@ -1541,11 +1602,31 @@ export default function BundleBuilder() {
                           : setPricingValue(value)
                       }
                       pricingValueError={pricingValueError}
+                    />
+                    <PricingSummaryBox
+                      type={type}
+                      shopCurrency={shopCurrency}
                       paidItems={paidItems}
                       combinedPrice={combinedPrice}
                       computedBundlePrice={computedBundlePrice}
                       savings={savings}
                       hasMissingPrices={hasMissingPrices}
+                    />
+                    <Divider />
+                    <ProductsSection
+                      type={type}
+                      shopCurrency={shopCurrency}
+                      poolSource={poolSource}
+                      setPoolSource={setPoolSource}
+                      showCollectionPool={showCollectionPool}
+                      showAllProductsNotice={showAllProductsNotice}
+                      collections={collections}
+                      setCollections={setCollections}
+                      collectionPoolItems={collectionPoolItems}
+                      paidItems={paidItems}
+                      setActiveItems={setActiveItems}
+                      openResourcePicker={openResourcePicker}
+                      openCollectionPicker={openCollectionPicker}
                     />
                   </BlockStack>
                 </Card>
@@ -1568,38 +1649,44 @@ export default function BundleBuilder() {
                       removeActivePackage={removeActivePackage}
                     />
                     <Divider />
-                    <ProductsSection
+                    <InlineGrid columns={{ xs: 1, sm: 2 }} gap="400">
+                      <PricingSection
+                        type={type}
+                        shopCurrency={shopCurrency}
+                        activePricingType={activePricingType}
+                        activePricingValue={activePricingValue}
+                        onPricingTypeChange={(value) =>
+                          updateActivePackage({ pricingType: value })
+                        }
+                        onPricingValueChange={(value) =>
+                          updateActivePackage({ pricingValue: value })
+                        }
+                        pricingValueError={pricingValueError}
+                      />
+                      <BlockStack gap="400">
+                        <Text as="h2" variant="headingMd">
+                          Slots
+                        </Text>
+                          <TextField
+                            label="Number of slots"
+                            type="number"
+                            min={2}
+                            value={packages[activePackageIndex]?.slotCount ?? "2"}
+                            onChange={(value) => updateActivePackage({ slotCount: value })}
+                            autoComplete="off"
+                            helpText="Customers fill every slot in this package to complete the bundle."
+                          />
+                      </BlockStack>
+                    </InlineGrid>
+                    <PricingSummaryBox
                       type={type}
                       shopCurrency={shopCurrency}
-                      poolSource={activePoolSource}
-                      setPoolSource={setActivePoolSource}
-                      showCollectionPool={showCollectionPool}
-                      showAllProductsNotice={showAllProductsNotice}
-                      collections={activeCollections}
-                      setCollections={setActiveCollections}
-                      collectionPoolItems={activeCollectionPoolItems}
                       paidItems={paidItems}
-                      setActiveItems={setActiveItems}
-                      openResourcePicker={openResourcePicker}
-                      openCollectionPicker={openCollectionPicker}
+                      combinedPrice={combinedPrice}
+                      computedBundlePrice={computedBundlePrice}
+                      savings={savings}
+                      hasMissingPrices={hasMissingPrices}
                     />
-                    <Divider />
-                    <BlockStack gap="400">
-                      <Text as="h2" variant="headingMd">
-                        Slots
-                      </Text>
-                      <div style={{ maxWidth: 200 }}>
-                        <TextField
-                          label="Number of slots"
-                          type="number"
-                          min={2}
-                          value={packages[activePackageIndex]?.slotCount ?? "2"}
-                          onChange={(value) => updateActivePackage({ slotCount: value })}
-                          autoComplete="off"
-                          helpText="Customers fill every slot in this package to complete the bundle."
-                        />
-                      </div>
-                    </BlockStack>
                     <Divider />
                     <GiftsSection
                       giftItems={giftItems}
@@ -1611,23 +1698,24 @@ export default function BundleBuilder() {
                       }
                     />
                     <Divider />
-                    <PricingSection
+                    <ProductsSection
                       type={type}
                       shopCurrency={shopCurrency}
-                      activePricingType={activePricingType}
-                      activePricingValue={activePricingValue}
-                      onPricingTypeChange={(value) =>
-                        updateActivePackage({ pricingType: value })
-                      }
-                      onPricingValueChange={(value) =>
-                        updateActivePackage({ pricingValue: value })
-                      }
-                      pricingValueError={pricingValueError}
+                      poolSource={activePoolSource}
+                      setPoolSource={setActivePoolSource}
+                      showCollectionPool={showCollectionPool}
+                      showAllProductsNotice={showAllProductsNotice}
+                      collections={activeCollections}
+                      setCollections={setActiveCollections}
+                      collectionPoolItems={activeCollectionPoolItems}
+                      variantFilter={activeVariantFilter}
+                      setVariantFilter={setActiveVariantFilter}
+                      onResolveProducts={resolveActivePoolProducts}
+                      isResolvingPool={isResolvingPool}
                       paidItems={paidItems}
-                      combinedPrice={combinedPrice}
-                      computedBundlePrice={computedBundlePrice}
-                      savings={savings}
-                      hasMissingPrices={hasMissingPrices}
+                      setActiveItems={setActiveItems}
+                      openResourcePicker={openResourcePicker}
+                      openCollectionPicker={openCollectionPicker}
                     />
                   </BlockStack>
                 </Card>

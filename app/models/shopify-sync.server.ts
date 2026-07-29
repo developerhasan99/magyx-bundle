@@ -653,6 +653,10 @@ export interface ProductPoolItem {
   productId: string;
   variantId: string;
   title: string;
+  // Raw variant title (e.g. "50ml"), separate from the combined `title`
+  // above (e.g. "Product — 50ml") — lets callers filter by variant text
+  // without accidentally matching text in the product's own name.
+  variantTitle: string;
   image: string | null;
   price: number;
   available: boolean;
@@ -700,13 +704,19 @@ async function attachPoolItemSubtext(
  * fetchVariantPoolItems instead — the merchant already chose a specific
  * variant there, and expanding to every sibling variant would silently
  * override that choice.
+ *
+ * `variantTitleFilter`, when set, keeps only variants whose own title
+ * contains it (case-insensitive) — e.g. "50" narrows a whole collection's
+ * pool down to just its "50ml" variants, without hand-picking products.
  */
 export async function fetchProductPoolItems(
   admin: AdminApiContext,
   productIds: string[],
   subtextTemplate?: string | null,
+  variantTitleFilter?: string | null,
 ): Promise<ProductPoolItem[]> {
   if (productIds.length === 0) return [];
+  const trimmedFilter = variantTitleFilter?.trim().toLowerCase();
 
   const response = await admin.graphql(
     `#graphql
@@ -739,11 +749,13 @@ export async function fetchProductPoolItems(
     if (!product) continue;
     for (const edge of product.variants?.edges ?? []) {
       const variant = edge.node;
+      if (trimmedFilter && !(variant.title ?? "").toLowerCase().includes(trimmedFilter)) continue;
       const hasRealVariantTitle = variant.title && variant.title !== "Default Title";
       items.push({
         productId: product.id,
         variantId: variant.id,
         title: hasRealVariantTitle ? `${product.title} — ${variant.title}` : product.title,
+        variantTitle: variant.title ?? "",
         image: variant.image?.url ?? product.featuredImage?.url ?? null,
         price: parseFloat(variant.price),
         available: variant.availableForSale,
@@ -800,6 +812,7 @@ export async function fetchVariantPoolItems(
       productId: variant.product.id,
       variantId: variant.id,
       title: hasRealVariantTitle ? `${variant.product.title} — ${variant.title}` : variant.product.title,
+      variantTitle: variant.title ?? "",
       image: variant.image?.url ?? variant.product.featuredImage?.url ?? null,
       price: parseFloat(variant.price),
       available: variant.availableForSale,
@@ -1313,6 +1326,9 @@ interface SlotBuilderPackageInput {
   // variant to respect there.
   poolVariantIds: string[];
   collectionIds: string[];
+  // COLLECTIONS-sourced pools only: case-insensitive substring match against
+  // each variant's own title, applied when resolving the snapshot below.
+  variantFilter: string;
   gifts: { variantId: string; quantity: number }[];
   // Denormalized gift info for the storefront widget's gift display
   giftDisplayItems: {
@@ -1536,7 +1552,12 @@ export async function publishSlotBuilderBundleProduct(
           const productIds = (
             await resolveCollectionProductIds(admin, pkg.collectionIds, POOL_SNAPSHOT_LIMIT)
           ).slice(0, POOL_SNAPSHOT_LIMIT);
-          const items = await fetchProductPoolItems(admin, productIds, subtextTemplate);
+          const items = await fetchProductPoolItems(
+            admin,
+            productIds,
+            subtextTemplate,
+            pkg.variantFilter,
+          );
           return items.slice(0, POOL_SNAPSHOT_LIMIT);
         } catch (error) {
           console.warn("Magyx Bundle: could not resolve pool snapshot for package", pkg.packageId, error);

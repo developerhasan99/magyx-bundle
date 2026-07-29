@@ -71,6 +71,9 @@ export interface PackageInput {
   poolSource: string;
   slotCount: number;
   collectionIds: string[];
+  // COLLECTIONS-sourced pools only: case-insensitive substring match against
+  // each variant's own title (e.g. "50" only keeps "50ml" variants).
+  variantFilter: string;
   items: BundleItemInput[];
 }
 
@@ -183,6 +186,7 @@ function packagesCreateData(packages: PackageInput[]) {
     poolSource: pkg.poolSource,
     slotCount: pkg.slotCount,
     collectionIds: JSON.stringify(pkg.collectionIds),
+    variantFilter: pkg.variantFilter,
     items: { create: pkg.items },
   }));
 }
@@ -262,6 +266,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         poolSource: pkg.poolSource,
         slotCount: pkg.slotCount,
         collectionIds: JSON.stringify(pkg.collectionIds),
+        variantFilter: pkg.variantFilter,
       };
       if (pkg.id && existingPackageIds.has(pkg.id)) {
         await tx.bundlePackageItem.deleteMany({ where: { packageId: pkg.id } });

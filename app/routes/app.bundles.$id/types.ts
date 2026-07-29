@@ -109,6 +109,10 @@ export interface PackageState {
   collections: CollectionState[];
   // Live preview of collections' resolved contents — see ResolvedPoolItem.
   collectionPoolItems: ResolvedPoolItem[];
+  // COLLECTIONS-sourced pools only: case-insensitive substring match against
+  // each variant's own title (e.g. "50" only keeps "50ml" variants). Ignored
+  // for PRODUCTS-sourced pools, which are already hand-picked exactly.
+  variantFilter: string;
   slotCount: string;
 }
 
@@ -125,9 +129,24 @@ export function defaultPackageState(): PackageState {
     poolSource: "PRODUCTS",
     collections: [],
     collectionPoolItems: [],
+    variantFilter: "",
     slotCount: "2",
   };
 }
+
+// MIX_MATCH/SLOT_BUILDER: where a package's product pool comes from.
+export const POOL_SOURCE_OPTIONS = [
+  {
+    label: "Specific products",
+    value: "PRODUCTS",
+    helpText: "Hand-pick the products shown in the selection panel.",
+  },
+  {
+    label: "Collections",
+    value: "COLLECTIONS",
+    helpText: "Show every product from the chosen collections — stays up to date automatically.",
+  },
+] as const;
 
 // QUANTITY_BREAKS only: which products the pack-size tiers apply to.
 export const QUANTITY_BREAK_SCOPE_OPTIONS = [

@@ -120,6 +120,11 @@ model BundlePackage {
   poolSource       String              @default("PRODUCTS") // PRODUCTS | COLLECTIONS
   slotCount        Int                 @default(2)
   collectionIds    String              @default("[]") // JSON array of eligible collection GIDs
+  // COLLECTIONS-sourced pools only: case-insensitive substring match against
+  // each variant's own title (e.g. "50" only keeps "50ml" variants) — lets a
+  // merchant narrow a whole collection's pool to one size/option without
+  // hand-picking products. Empty = no filtering (every variant included).
+  variantFilter    String              @default("")
   items            BundlePackageItem[]
 }
 
