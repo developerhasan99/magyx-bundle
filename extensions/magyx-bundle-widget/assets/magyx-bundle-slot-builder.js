@@ -10,15 +10,45 @@
 (function () {
   "use strict";
 
+  // Inserts `thousands` every 3 digits of the integer part, then joins back
+  // to the decimal part (if any) with `decimal` — e.g. ("1049.95", " ", ",")
+  // -> "1 049,95", matching Shopify's {{ amount_with_space_separator }}.
+  function withSeparators(value, thousands, decimal) {
+    var parts = value.split(".");
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, thousands);
+    return parts.join(decimal);
+  }
+
+  // Covers all of Shopify's money_format placeholders, not just the 3 most
+  // common ones — a market/locale using a less common one (e.g. Sweden's
+  // default {{ amount_with_space_separator }}) would otherwise show the
+  // literal, un-replaced placeholder text instead of a price.
   function formatMoney(amount, format) {
-    var value = (Math.round(amount * 100) / 100).toFixed(2);
-    if (!format) return "$" + value;
+    var noDecimals = String(Math.round(amount));
+    var twoDecimals = (Math.round(amount * 100) / 100).toFixed(2);
+    if (!format) return "$" + twoDecimals;
     return format
-      .replace(/\{\{\s*amount\s*\}\}/, value)
-      .replace(/\{\{\s*amount_no_decimals\s*\}\}/, String(Math.round(amount)))
+      .replace(/\{\{\s*amount\s*\}\}/g, twoDecimals)
+      .replace(/\{\{\s*amount_no_decimals\s*\}\}/g, noDecimals)
       .replace(
-        /\{\{\s*amount_with_comma_separator\s*\}\}/,
-        value.replace(".", ","),
+        /\{\{\s*amount_with_comma_separator\s*\}\}/g,
+        withSeparators(twoDecimals, ".", ","),
+      )
+      .replace(
+        /\{\{\s*amount_no_decimals_with_comma_separator\s*\}\}/g,
+        withSeparators(noDecimals, ".", ","),
+      )
+      .replace(
+        /\{\{\s*amount_with_apostrophe_separator\s*\}\}/g,
+        withSeparators(twoDecimals, "'", "."),
+      )
+      .replace(
+        /\{\{\s*amount_with_space_separator\s*\}\}/g,
+        withSeparators(twoDecimals, " ", ","),
+      )
+      .replace(
+        /\{\{\s*amount_no_decimals_with_space_separator\s*\}\}/g,
+        withSeparators(noDecimals, " ", ","),
       );
   }
 
