@@ -452,7 +452,7 @@
             (pkg.price != null
               ? '<span class="magyx-slot-builder__pack-tab-price">' +
                 formatMoney(pkg.price, moneyFormat) +
-                "/ea</span>"
+                "</span>"
               : "");
           tab.addEventListener("click", function () {
             selectPackage(index);
