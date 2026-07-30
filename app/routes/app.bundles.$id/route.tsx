@@ -16,6 +16,7 @@ import {
   Badge,
   Divider,
   Box,
+  Tooltip,
 } from "@shopify/polaris";
 import { PlusIcon } from "@shopify/polaris-icons";
 import { SaveBar, TitleBar, useAppBridge } from "@shopify/app-bridge-react";
@@ -713,6 +714,15 @@ export default function BundleBuilder() {
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
   const isNew = !bundle;
+  // FIXED/SLOT_BUILDER packages each become their own Shopify product
+  // variant. Once the bundle has actually been published (has a real
+  // Shopify product), adding a new package means reconciling that variant
+  // set live against the Shopify Product Options API — order-sensitive and
+  // has sharp edges (e.g. reusing a label from a since-deleted package can
+  // collide with a leftover, orphaned option value). Safer to just not
+  // offer it once there's a live product; removing/editing existing
+  // packages is unaffected, since deleting a variant has no such edge cases.
+  const canAddPackage = !bundle?.shopifyProductId;
 
   const initialForm = useMemo(
     () => formStateOf(bundle, requestedType),
@@ -1594,9 +1604,17 @@ export default function BundleBuilder() {
                       <Text as="h2" variant="headingMd">
                         Packages
                       </Text>
-                      <Button icon={PlusIcon} onClick={addPackage}>
-                        Add package
-                      </Button>
+                      <Tooltip
+                        content={
+                          canAddPackage
+                            ? undefined
+                            : "Packages can't be added once this bundle has been published to Shopify. Remove or edit existing packages instead."
+                        }
+                      >
+                        <Button icon={PlusIcon} onClick={addPackage} disabled={!canAddPackage}>
+                          Add package
+                        </Button>
+                      </Tooltip>
                     </InlineStack>
                     <PackagesTabsSection
                       packages={packages}
@@ -1667,9 +1685,17 @@ export default function BundleBuilder() {
                       <Text as="h2" variant="headingMd">
                         Packages
                       </Text>
-                      <Button icon={PlusIcon} onClick={addPackage}>
-                        Add package
-                      </Button>
+                      <Tooltip
+                        content={
+                          canAddPackage
+                            ? undefined
+                            : "Packages can't be added once this bundle has been published to Shopify. Remove or edit existing packages instead."
+                        }
+                      >
+                        <Button icon={PlusIcon} onClick={addPackage} disabled={!canAddPackage}>
+                          Add package
+                        </Button>
+                      </Tooltip>
                     </InlineStack>
                     <PackagesTabsSection
                       packages={packages}

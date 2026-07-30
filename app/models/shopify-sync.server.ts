@@ -1225,20 +1225,34 @@ async function resolvePackageVariants(
       if (value) valueByVariantId.set(v.id, value);
     }
     const valueIdByName = new Map(packOption.optionValues.map((v) => [v.name, v.id]));
-    const currentLabels = new Set(valueByVariantId.values());
+    // Value names that currently have a live variant attached — a package
+    // whose label is in here needs nothing created (the variant is matched
+    // up by label further down), even if our DB never recorded its variant
+    // id (e.g. a previous publish failed partway through).
+    const labelsWithVariant = new Set(valueByVariantId.values());
 
     const optionValuesToUpdate: { id: string; name: string }[] = [];
     const optionValuesToAdd: { name: string }[] = [];
+    // Option values persist even after every variant using them is deleted
+    // (e.g. a package was removed, then a later package reused that same
+    // label) — reusing that leftover value's own id for a fresh variant
+    // avoids re-adding a value name Shopify already has, which it rejects
+    // outright ("Option value already exists").
+    const orphanedValueIdsNeedingVariant: string[] = [];
     for (const pkg of packages) {
       const currentValue = pkg.existingVariantId ? valueByVariantId.get(pkg.existingVariantId) : undefined;
       if (currentValue && currentValue !== pkg.label) {
         const valueId = valueIdByName.get(currentValue);
         if (valueId) optionValuesToUpdate.push({ id: valueId, name: pkg.label });
-      } else if (!currentValue && !currentLabels.has(pkg.label)) {
-        // Not tracked by variant id and no existing value already matches
-        // this label (e.g. a product just created with this exact set of
-        // pack labels) — genuinely new, needs a value + variant created.
-        optionValuesToAdd.push({ name: pkg.label });
+      } else if (!currentValue && !labelsWithVariant.has(pkg.label)) {
+        const existingValueId = valueIdByName.get(pkg.label);
+        if (existingValueId) {
+          orphanedValueIdsNeedingVariant.push(existingValueId);
+        } else {
+          // Genuinely new — no existing value with this name at all — needs
+          // a value + variant created.
+          optionValuesToAdd.push({ name: pkg.label });
+        }
       }
     }
 
@@ -1256,7 +1270,7 @@ async function resolvePackageVariants(
             option: $option
             optionValuesToAdd: $optionValuesToAdd
             optionValuesToUpdate: $optionValuesToUpdate
-            variantStrategy: CREATE
+            variantStrategy: MANAGE
           ) {
             userErrors { field message }
           }
@@ -1275,6 +1289,35 @@ async function resolvePackageVariants(
         (await updateOptionResponse.json()).data?.productOptionUpdate?.userErrors ?? [];
       if (updateOptionErrors.length) {
         throw new Error(`Failed to update pack options: ${JSON.stringify(updateOptionErrors)}`);
+      }
+    }
+
+    if (orphanedValueIdsNeedingVariant.length > 0) {
+      const createVariantsResponse = await admin.graphql(
+        `#graphql
+        mutation createBundleVariantsForExistingValues(
+          $productId: ID!
+          $variants: [ProductVariantsBulkInput!]!
+        ) {
+          productVariantsBulkCreate(productId: $productId, variants: $variants) {
+            userErrors { field message }
+          }
+        }`,
+        {
+          variables: {
+            productId,
+            variants: orphanedValueIdsNeedingVariant.map((valueId) => ({
+              optionValues: [{ optionId: packOption.id, id: valueId }],
+            })),
+          },
+        },
+      );
+      const createVariantsErrors =
+        (await createVariantsResponse.json()).data?.productVariantsBulkCreate?.userErrors ?? [];
+      if (createVariantsErrors.length) {
+        throw new Error(
+          `Failed to create variants for existing pack options: ${JSON.stringify(createVariantsErrors)}`,
+        );
       }
     }
   }
