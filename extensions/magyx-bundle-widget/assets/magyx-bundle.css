@@ -1105,7 +1105,7 @@
    unlocking package on click. All cosmetic — checkout adds unlocked gifts
    whether or not they're scratched. */
 .magyx-slot-builder__gifts {
-  margin: 20px 0 12px;
+  margin-top: 20px;
 }
 
 .magyx-slot-builder__gifts[hidden] {
@@ -1310,6 +1310,7 @@ button.magyx-slot-builder__gift-card {
    define it — force block layout so it doesn't fall back to the default
    inline display and break the form/button's block/full-width sizing. */
 .magyx-slot-builder__product-form {
+  margin-top: 20px;
   display: block;
 }
 
@@ -1323,15 +1324,16 @@ button.magyx-slot-builder__gift-card {
   width: 100%;
   border: none;
   border-radius: var(--bc-radius);
-  padding: 14px;
+  padding: 16px 14px;
   background: var(--bc-accent);
   color: #fff;
   font-weight: 600;
   cursor: pointer;
+  font-size: 16px;
 }
 
 .magyx-slot-builder__cta:disabled {
-  opacity: 0.45;
+  opacity: 0.75;
   cursor: not-allowed;
 }
 
