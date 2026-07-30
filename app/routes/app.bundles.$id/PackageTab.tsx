@@ -33,7 +33,6 @@ export function PackageTab({
       onClick={onSelect}
       aria-pressed={selected}
       style={{
-        position: "relative",
         display: "flex",
         alignItems: "center",
         gap: "var(--p-space-150)",
@@ -59,11 +58,6 @@ export function PackageTab({
         // instead of sitting inline next to the label where long text wraps.
         <span
           style={{
-            position: "absolute",
-            top: -10,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 1,
             display: "inline-flex",
             alignItems: "center",
             padding: "2px 8px",

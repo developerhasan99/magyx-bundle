@@ -110,13 +110,6 @@
     }
   }
 
-  function findNativeForm() {
-    return (
-      document.querySelector('form[data-type="add-to-cart-form"]') ||
-      document.querySelector('form[action*="/cart/add"]')
-    );
-  }
-
   // Each package (bottle size / pack size) has its own independent product
   // pool, keyed by that package's own variant id. Used for both the
   // publish-time snapshot baked into the page and the live proxy fetch —
@@ -225,11 +218,6 @@
         return poolByVariantId[numericId(pkg.variantId)] || [];
       }
 
-      var nativeForm = findNativeForm();
-      var hasNativeButton = !!(
-        nativeForm && nativeForm.querySelector('[name="id"]')
-      );
-
       var html = "";
       html +=
         '<div class="magyx-slot-builder__price" data-sb="price" hidden>' +
@@ -260,10 +248,25 @@
         '<div class="magyx-slot-builder__gifts" data-sb="gifts" hidden></div>';
       html +=
         '<p class="magyx-slot-builder__error" data-sb="error" hidden></p>';
-      if (!hasNativeButton) {
-        html +=
-          '<button type="button" class="magyx-slot-builder__cta" data-sb="cta"></button>';
-      }
+      // Our own add-to-cart form instead of hijacking the theme's — gives
+      // full control over the button's text/disabled state. `data-type`,
+      // the `/cart/add` action, and the `<product-form>` wrapper match the
+      // markup most Dawn-derived theme cart-drawer scripts scan the page
+      // for (that custom element upgrades ANY `<product-form>` on the
+      // page, not just the theme's own), so most themes pick this up and
+      // AJAX-intercept it same as their own product form; `return_to`
+      // covers themes that don't, falling back to a normal navigation.
+      html +=
+        '<product-form class="magyx-slot-builder__product-form" data-sb="product-form">' +
+        '<form class="magyx-slot-builder__atc-form" data-sb="form" action="/cart/add" method="post" data-type="add-to-cart-form" accept-charset="UTF-8">' +
+        '<input type="hidden" name="id" value="' +
+        numericId(packages[0].variantId) +
+        '" data-sb="variant-id">' +
+        '<input type="hidden" name="quantity" value="1">' +
+        '<input type="hidden" name="return_to" value="/cart">' +
+        '<button type="submit" name="add" class="magyx-slot-builder__cta" data-sb="cta"></button>' +
+        "</form>" +
+        "</product-form>";
       html +=
         '<div class="magyx-slot-builder-modal" data-sb="modal" hidden>' +
         '<div class="magyx-slot-builder-modal__overlay" data-sb="overlay"></div>' +
@@ -300,6 +303,8 @@
       var searchInputEl = stateEl.querySelector('[data-sb="search"]');
       var listEl = stateEl.querySelector('[data-sb="list"]');
       var openBtn = stateEl.querySelector('[data-sb="open"]');
+      var formEl = stateEl.querySelector('[data-sb="form"]');
+      var variantIdInput = stateEl.querySelector('[data-sb="variant-id"]');
       var ctaBtn = stateEl.querySelector('[data-sb="cta"]');
       var searchText = "";
       // Tag the shopper is filtering the pool by (chips defined per package
@@ -379,12 +384,8 @@
         renderPacks();
         update();
         var pkgAfter = activePackage();
-        if (nativeForm && pkgAfter.variantId) {
-          var idField = nativeForm.querySelector('[name="id"]');
-          if (idField) {
-            idField.value = numericId(pkgAfter.variantId);
-            idField.dispatchEvent(new Event("change", { bubbles: true }));
-          }
+        if (variantIdInput && pkgAfter.variantId) {
+          variantIdInput.value = numericId(pkgAfter.variantId);
         }
       }
 
@@ -1077,12 +1078,6 @@
         openModal();
       }
 
-      function packageVariantIds() {
-        return packages.map(function (pkg) {
-          return numericId(pkg.variantId);
-        });
-      }
-
       function injectProperties(form) {
         form
           .querySelectorAll("[data-magyx-slot-builder-property]")
@@ -1105,71 +1100,25 @@
         });
       }
 
-      if (nativeForm) {
-        var variantIds = packageVariantIds();
-        document.addEventListener(
-          "submit",
-          function (event) {
-            var form = event.target;
-            if (!(form instanceof HTMLFormElement)) return;
-            if (!/\/cart\/add/.test(form.action)) return;
-            var idField = form.elements["id"];
-            var variantId = idField ? numericId(idField.value) : null;
-            if (!variantId || variantIds.indexOf(variantId) === -1) return;
-            if (remaining() > 0) {
-              event.preventDefault();
-              event.stopPropagation();
-              showIncompleteError();
-              return;
-            }
-            injectProperties(form);
-          },
-          true,
-        );
-      }
-
-      if (!hasNativeButton) {
-        ctaBtn.addEventListener("click", function () {
-          if (remaining() > 0) {
-            showIncompleteError();
-            return;
-          }
-          var pkg = activePackage();
-          var originalLabel = ctaBtn.textContent;
-          ctaBtn.disabled = true;
-          ctaBtn.textContent = "Adding…";
-          var props = {};
-          buildProperties().forEach(function (p) {
-            props[p.key] = p.value;
-          });
-          props._magyx_slot_bundle_id = data.bundleId;
-          props._magyx_slot_selection = JSON.stringify(selectionArray());
-          fetch("/cart/add.js", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              items: [
-                {
-                  id: parseInt(numericId(pkg.variantId), 10),
-                  quantity: 1,
-                  properties: props,
-                },
-              ],
-            }),
-          })
-            .then(function (response) {
-              if (!response.ok) throw new Error("add failed");
-              window.location.href = "/cart";
-            })
-            .catch(function () {
-              ctaBtn.disabled = false;
-              ctaBtn.textContent = originalLabel;
-              alert(
-                "Sorry, we couldn't add this to your cart. Please try again.",
-              );
-            });
-        });
-      }
+      formEl.addEventListener("submit", function (event) {
+        if (remaining() > 0) {
+          event.preventDefault();
+          showIncompleteError();
+          return;
+        }
+        injectProperties(formEl);
+        var originalLabel = ctaBtn.textContent;
+        ctaBtn.disabled = true;
+        ctaBtn.textContent = "Adding…";
+        // Most themes intercept this submit for their own AJAX cart drawer
+        // and never actually navigate away, so the button needs resetting
+        // by hand; a theme with no such interception just navigates to
+        // `return_to` before this ever fires.
+        setTimeout(function () {
+          ctaBtn.disabled = false;
+          ctaBtn.textContent = originalLabel;
+        }, 1500);
+      });
 
       renderPacks();
       update();

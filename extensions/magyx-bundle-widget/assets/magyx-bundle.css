@@ -1306,6 +1306,18 @@ button.magyx-slot-builder__gift-card {
   margin: 0 0 10px;
 }
 
+/* `<product-form>` is an unregistered custom element on themes that don't
+   define it — force block layout so it doesn't fall back to the default
+   inline display and break the form/button's block/full-width sizing. */
+.magyx-slot-builder__product-form {
+  display: block;
+}
+
+.magyx-slot-builder__atc-form {
+  display: block;
+  margin: 0;
+}
+
 .magyx-slot-builder__cta {
   display: block;
   width: 100%;
