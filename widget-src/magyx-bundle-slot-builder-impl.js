@@ -237,6 +237,7 @@
         '<p class="magyx-slot-builder-modal__title" data-sb="modal-title"></p>' +
         '<p class="magyx-slot-builder-modal__subtitle" data-sb="modal-subtitle"></p>' +
         "</div>" +
+        '<div class="magyx-slot-builder-modal__filters" data-sb="filters" hidden></div>' +
         '<div class="magyx-slot-builder-modal__search-wrap">' +
         '<svg class="magyx-slot-builder-modal__search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg>' +
         '<input type="text" class="magyx-slot-builder-modal__search" data-sb="search" placeholder="Search products…" autocomplete="off">' +
@@ -259,11 +260,15 @@
       var modalEl = stateEl.querySelector('[data-sb="modal"]');
       var modalTitleEl = stateEl.querySelector('[data-sb="modal-title"]');
       var modalSubtitleEl = stateEl.querySelector('[data-sb="modal-subtitle"]');
+      var filtersEl = stateEl.querySelector('[data-sb="filters"]');
       var searchInputEl = stateEl.querySelector('[data-sb="search"]');
       var listEl = stateEl.querySelector('[data-sb="list"]');
       var openBtn = stateEl.querySelector('[data-sb="open"]');
       var ctaBtn = stateEl.querySelector('[data-sb="cta"]');
       var searchText = "";
+      // Tag the shopper is filtering the pool by (chips defined per package
+      // in the app admin); null = the "All" chip.
+      var activeTag = null;
 
       // `position: fixed` only escapes to the viewport when nothing between
       // this element and <body> establishes its own containing block
@@ -551,6 +556,45 @@
         }
       }
 
+      function itemHasTag(item, tag) {
+        var tags = item.tags || [];
+        for (var i = 0; i < tags.length; i++) {
+          if (String(tags[i]).toLowerCase() === tag) return true;
+        }
+        return false;
+      }
+
+      // Round filter chips between the modal header and the search field —
+      // one per merchant-defined category (button text + product tag), plus
+      // an automatic "All" chip. Hidden when the package defines none.
+      function renderFilters() {
+        var pkg = activePackage();
+        var filters = (pkg && pkg.tagFilters) || [];
+        filtersEl.innerHTML = "";
+        if (filters.length === 0) {
+          filtersEl.hidden = true;
+          return;
+        }
+        filtersEl.hidden = false;
+        [{ label: "All", tag: null }].concat(filters).forEach(function (filter) {
+          var tag = filter.tag == null ? null : String(filter.tag).toLowerCase();
+          var chip = document.createElement("button");
+          chip.type = "button";
+          chip.className =
+            "magyx-slot-builder-modal__filter" +
+            (tag === activeTag ? " magyx-slot-builder-modal__filter--active" : "");
+          chip.setAttribute("aria-pressed", tag === activeTag ? "true" : "false");
+          chip.textContent = filter.label;
+          chip.addEventListener("click", function () {
+            if (tag === activeTag) return;
+            activeTag = tag;
+            renderFilters();
+            renderList();
+          });
+          filtersEl.appendChild(chip);
+        });
+      }
+
       function renderList() {
         listEl.innerHTML = "";
         var full = remaining() === 0;
@@ -563,19 +607,26 @@
           listEl.appendChild(empty);
           return;
         }
-        var visibleItems = searchText
+        var tagItems = activeTag
           ? poolItems.filter(function (item) {
+              return itemHasTag(item, activeTag);
+            })
+          : poolItems;
+        var visibleItems = searchText
+          ? tagItems.filter(function (item) {
               return (
                 item.title.toLowerCase().indexOf(searchText) !== -1 ||
                 (item.subtext &&
                   item.subtext.toLowerCase().indexOf(searchText) !== -1)
               );
             })
-          : poolItems;
+          : tagItems;
         if (visibleItems.length === 0) {
           var noMatch = document.createElement("p");
           noMatch.className = "magyx-slot-builder__empty";
-          noMatch.textContent = "No products match your search.";
+          noMatch.textContent = searchText
+            ? "No products match your search."
+            : "No products match this filter.";
           listEl.appendChild(noMatch);
           return;
         }
@@ -690,6 +741,10 @@
       function openModal() {
         searchText = "";
         searchInputEl.value = "";
+        // Fresh filter state each open — also picks up the right chip set
+        // after a pack switch, since each package has its own tagFilters.
+        activeTag = null;
+        renderFilters();
         renderModalHeader();
         renderList();
         modalEl.hidden = false;

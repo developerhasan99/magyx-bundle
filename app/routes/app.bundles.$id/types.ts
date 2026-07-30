@@ -30,6 +30,15 @@ export interface ResolvedPoolItem {
   available: boolean;
 }
 
+// SLOT_BUILDER only: one storefront pool-modal filter chip. `label` is the
+// button text customers see, `tag` the exact product tag it matches — the
+// widget adds an "All" chip automatically, so merchants only define real
+// categories here.
+export interface TagFilterState {
+  label: string;
+  tag: string;
+}
+
 export interface TierState {
   quantity: string;
   discount: string;
@@ -113,6 +122,8 @@ export interface PackageState {
   // each variant's own title (e.g. "50" only keeps "50ml" variants). Ignored
   // for PRODUCTS-sourced pools, which are already hand-picked exactly.
   variantFilter: string;
+  // Storefront pool-modal filter chips — see TagFilterState.
+  tagFilters: TagFilterState[];
   slotCount: string;
 }
 
@@ -130,6 +141,7 @@ export function defaultPackageState(): PackageState {
     collections: [],
     collectionPoolItems: [],
     variantFilter: "",
+    tagFilters: [],
     slotCount: "2",
   };
 }

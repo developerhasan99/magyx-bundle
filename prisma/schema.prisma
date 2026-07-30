@@ -127,6 +127,11 @@ model BundlePackage {
   // merchant narrow a whole collection's pool to one size/option without
   // hand-picking products. Empty = no filtering (every variant included).
   variantFilter    String              @default("")
+  // Storefront pool-modal filter chips — JSON array of { label, tag }:
+  // `label` is the button text customers see, `tag` the exact product tag it
+  // matches (case-insensitive). Display-only; an "All" chip is added
+  // automatically by the widget. Empty = no filter row shown.
+  tagFilters       String              @default("[]")
   items            BundlePackageItem[]
 }
 

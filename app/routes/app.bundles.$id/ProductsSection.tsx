@@ -18,6 +18,7 @@ import {
   type CollectionState,
   type ItemState,
   type ResolvedPoolItem,
+  type TagFilterState,
 } from "./types";
 
 // Shared product/collection pool block — reused by FIXED ("Products in
@@ -35,6 +36,8 @@ export function ProductsSection({
   collectionPoolItems,
   variantFilter,
   setVariantFilter,
+  tagFilters,
+  setTagFilters,
   onResolveProducts,
   isResolvingPool,
   paidItems,
@@ -55,6 +58,10 @@ export function ProductsSection({
   // offer this filter (or the resolve button) yet.
   variantFilter?: string;
   setVariantFilter?: (value: string) => void;
+  // SLOT_BUILDER only: the storefront pool-modal's tag filter chips — one
+  // row per category (button text + the exact product tag it matches).
+  tagFilters?: TagFilterState[];
+  setTagFilters?: (updater: (current: TagFilterState[]) => TagFilterState[]) => void;
   onResolveProducts?: () => void;
   isResolvingPool?: boolean;
   paidItems: ItemState[];
@@ -340,6 +347,84 @@ export function ProductsSection({
           ))}
         </BlockStack>
       ))}
+      {tagFilters && setTagFilters && (
+        <BlockStack gap="300">
+          <Divider />
+          <InlineStack align="space-between" blockAlign="center">
+            <BlockStack gap="050">
+              <Text as="h3" variant="headingSm">
+                Filter buttons
+              </Text>
+              <Text as="p" variant="bodySm" tone="subdued">
+                Shown as round buttons in the product-pick window, before the
+                search field. Customers tap one to narrow the pool to products
+                carrying that tag — an &quot;All&quot; button is added
+                automatically.
+              </Text>
+            </BlockStack>
+            <Button
+              icon={PlusIcon}
+              onClick={() =>
+                setTagFilters((current) => [...current, { label: "", tag: "" }])
+              }
+            >
+              Add filter
+            </Button>
+          </InlineStack>
+          {tagFilters.length > 0 && (
+            <BlockStack gap="200">
+              {tagFilters.map((filter, index) => (
+                <InlineStack key={index} gap="200" blockAlign="start" wrap={false}>
+                  <div style={{ flex: 1 }}>
+                    <TextField
+                      label="Button text"
+                      labelHidden={index > 0}
+                      value={filter.label}
+                      onChange={(value) =>
+                        setTagFilters((current) =>
+                          current.map((f, i) => (i === index ? { ...f, label: value } : f)),
+                        )
+                      }
+                      autoComplete="off"
+                      placeholder="e.g. Serums"
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <TextField
+                      label="Product tag"
+                      labelHidden={index > 0}
+                      value={filter.tag}
+                      onChange={(value) =>
+                        setTagFilters((current) =>
+                          current.map((f, i) => (i === index ? { ...f, tag: value } : f)),
+                        )
+                      }
+                      autoComplete="off"
+                      placeholder="e.g. serum"
+                      helpText={
+                        index === tagFilters.length - 1
+                          ? "Must exactly match a tag on the product (not case-sensitive)."
+                          : undefined
+                      }
+                    />
+                  </div>
+                  <Box paddingBlockStart={index === 0 ? "600" : "0"}>
+                    <Button
+                      icon={DeleteIcon}
+                      variant="tertiary"
+                      tone="critical"
+                      accessibilityLabel={`Remove filter ${filter.label || index + 1}`}
+                      onClick={() =>
+                        setTagFilters((current) => current.filter((_, i) => i !== index))
+                      }
+                    />
+                  </Box>
+                </InlineStack>
+              ))}
+            </BlockStack>
+          )}
+        </BlockStack>
+      )}
     </BlockStack>
   );
 }

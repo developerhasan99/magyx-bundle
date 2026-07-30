@@ -43,6 +43,7 @@ import {
   type PackageState,
   type QbTierState,
   type ResolvedPoolItem,
+  type TagFilterState,
   type TierState,
 } from "./types";
 import { ProductsSection } from "./ProductsSection";
@@ -311,6 +312,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         // Not auto-resolved on load — see the comment above collectionPoolItems.
         collectionPoolItems: [] as ResolvedPoolItem[],
         variantFilter: p.variantFilter,
+        tagFilters: JSON.parse(p.tagFilters) as TagFilterState[],
         items: p.items.map((i) => ({
           productId: i.productId,
           variantId: i.variantId,
@@ -548,6 +550,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
               .map((i) => i.variantId!),
             collectionIds: JSON.parse(pkg.collectionIds) as string[],
             variantFilter: pkg.variantFilter,
+            tagFilters: JSON.parse(pkg.tagFilters) as { label: string; tag: string }[],
             gifts: pkg.items
               .filter((i) => i.isGift && i.variantId)
               .map((i) => ({ variantId: i.variantId!, quantity: i.quantity })),
@@ -632,6 +635,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
               collections: (p.collections ?? []) as CollectionState[],
               collectionPoolItems: (p.collectionPoolItems ?? []) as ResolvedPoolItem[],
               variantFilter: p.variantFilter ?? "",
+              tagFilters: (p.tagFilters ?? []) as TagFilterState[],
               slotCount: String(p.slotCount ?? 2),
               items: p.items.map(
                 (i): ItemState => ({
@@ -828,6 +832,18 @@ export default function BundleBuilder() {
   const setActiveVariantFilter = useCallback(
     (value: string) => updateActivePackage({ variantFilter: value }),
     [updateActivePackage],
+  );
+  // SLOT_BUILDER only: the active package's storefront pool-modal filter
+  // chips (button text + product tag per row).
+  const activeTagFilters = packages[activePackageIndex]?.tagFilters ?? [];
+  const setActiveTagFilters = useCallback(
+    (updater: (current: TagFilterState[]) => TagFilterState[]) =>
+      setPackages((current) =>
+        current.map((pkg, i) =>
+          i === activePackageIndex ? { ...pkg, tagFilters: updater(pkg.tagFilters) } : pkg,
+        ),
+      ),
+    [activePackageIndex],
   );
 
   // Resolving a COLLECTIONS pool is uncapped (see the loader) and can be
@@ -1358,6 +1374,14 @@ export default function BundleBuilder() {
                 slotCount: type === "SLOT_BUILDER" ? parseInt(pkg.slotCount, 10) || 0 : 0,
                 collectionIds: pkgUsesCollections ? pkg.collections.map((c) => c.id) : [],
                 variantFilter: pkgUsesCollections ? pkg.variantFilter.trim() : "",
+                // Rows with either field blank are still being typed — drop
+                // them rather than saving a chip that can't render/match.
+                tagFilters:
+                  type === "SLOT_BUILDER"
+                    ? pkg.tagFilters
+                        .map((f) => ({ label: f.label.trim(), tag: f.tag.trim() }))
+                        .filter((f) => f.label && f.tag)
+                    : [],
                 // Pool items (isGift: false) aren't sent when this package's
                 // pool is collection-sourced — only its free gifts are.
                 items: (pkgUsesCollections ? pkg.items.filter((i) => i.isGift) : pkg.items).map(
@@ -1710,6 +1734,8 @@ export default function BundleBuilder() {
                       collectionPoolItems={activeCollectionPoolItems}
                       variantFilter={activeVariantFilter}
                       setVariantFilter={setActiveVariantFilter}
+                      tagFilters={activeTagFilters}
+                      setTagFilters={setActiveTagFilters}
                       onResolveProducts={resolveActivePoolProducts}
                       isResolvingPool={isResolvingPool}
                       paidItems={paidItems}

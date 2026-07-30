@@ -661,6 +661,9 @@ export interface ProductPoolItem {
   price: number;
   available: boolean;
   subtext: string | null;
+  // The parent product's tags — what the storefront pool modal's tag filter
+  // chips (BundlePackage.tagFilters) match against.
+  tags: string[];
 }
 
 // Same "{{sku}}/{{vendor}}/{{metafield:...}}" template the admin sets once
@@ -725,6 +728,7 @@ export async function fetchProductPoolItems(
         ... on Product {
           id
           title
+          tags
           featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
           variants(first: 100) {
             edges {
@@ -760,6 +764,7 @@ export async function fetchProductPoolItems(
         price: parseFloat(variant.price),
         available: variant.availableForSale,
         subtext: null,
+        tags: product.tags ?? [],
       });
     }
   }
@@ -795,6 +800,7 @@ export async function fetchVariantPoolItems(
           product {
             id
             title
+            tags
             featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
           }
         }
@@ -817,6 +823,7 @@ export async function fetchVariantPoolItems(
       price: parseFloat(variant.price),
       available: variant.availableForSale,
       subtext: null,
+      tags: variant.product.tags ?? [],
     });
   }
 
@@ -1329,6 +1336,10 @@ interface SlotBuilderPackageInput {
   // COLLECTIONS-sourced pools only: case-insensitive substring match against
   // each variant's own title, applied when resolving the snapshot below.
   variantFilter: string;
+  // Storefront pool-modal filter chips — button text + the exact product tag
+  // each one matches. Display-only: baked into the display metafield for the
+  // widget, never enforced at checkout.
+  tagFilters: { label: string; tag: string }[];
   gifts: { variantId: string; quantity: number }[];
   // Denormalized gift info for the storefront widget's gift display
   giftDisplayItems: {
@@ -1577,6 +1588,7 @@ export async function publishSlotBuilderBundleProduct(
         price: pkg.pricingValue,
         slotCount: pkg.slotCount,
         freeShipping: pkg.freeShipping,
+        tagFilters: pkg.tagFilters,
         poolSnapshot: poolSnapshotsByPackage[index],
         gifts: pkg.giftDisplayItems.map((item) => ({
           title: item.title,
