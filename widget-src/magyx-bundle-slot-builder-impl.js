@@ -887,9 +887,10 @@
         ctaBtn.disabled = remaining() > 0;
       }
 
-      function renderNativeCtaText() {
+      function renderNativeCta() {
         if (!nativeCtaBtn) return;
         nativeCtaBtn.innerHTML = escapeHtml(ctaLabel());
+        nativeCtaBtn.disabled = remaining() > 0;
       }
 
       function itemHasTag(item, tag) {
@@ -1069,7 +1070,7 @@
         renderPicks();
         renderProgress();
         renderCta();
-        renderNativeCtaText();
+        renderNativeCta();
         renderModalHeader();
         renderGifts();
         openBtn.hidden = remaining() === 0;
