@@ -92,6 +92,8 @@ export interface BundleInput {
   widgetHeading: string;
   accentColor: string;
   showPrices: boolean;
+  // SLOT_BUILDER only: skip the cart and go straight to checkout after adding
+  skipCart: boolean;
   itemSubtextTemplate: string;
   showSubtextOnGifts: boolean;
   // FIXED bundles: waives shipping at checkout when this bundle is bought
@@ -209,6 +211,7 @@ export async function createBundle(shop: string, input: BundleInput) {
       widgetHeading: input.widgetHeading,
       accentColor: input.accentColor,
       showPrices: input.showPrices,
+      skipCart: input.skipCart,
       itemSubtextTemplate: input.itemSubtextTemplate,
       showSubtextOnGifts: input.showSubtextOnGifts,
       freeShipping: input.freeShipping,
@@ -299,6 +302,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         widgetHeading: input.widgetHeading,
         accentColor: input.accentColor,
         showPrices: input.showPrices,
+        skipCart: input.skipCart,
         itemSubtextTemplate: input.itemSubtextTemplate,
         showSubtextOnGifts: input.showSubtextOnGifts,
         freeShipping: input.freeShipping,

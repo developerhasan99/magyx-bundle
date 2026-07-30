@@ -29,6 +29,10 @@ model Bundle {
   widgetHeading   String       @default("What's inside")
   accentColor     String       @default("#1a1a1a")
   showPrices      Boolean      @default(false)
+  // SLOT_BUILDER only: skip the cart entirely and send the customer straight
+  // to checkout after adding — the widget renders its own button instead of
+  // deferring to the theme's native add-to-cart form when this is on.
+  skipCart        Boolean      @default(false)
   // Plain text + {{sku}}/{{vendor}}/{{type}}/{{barcode}}/{{weight}}/{{metafield:ns.key}}
   // placeholders, resolved per-item and rendered under each product's title
   itemSubtextTemplate String   @default("")

@@ -17,6 +17,9 @@ export function FixedAppearanceSection({
   setItemSubtextTemplate,
   showSubtextOnGifts,
   setShowSubtextOnGifts,
+  showSkipCartOption = false,
+  skipCart = false,
+  setSkipCart,
 }: {
   widgetStyle: string;
   setWidgetStyle: (value: string) => void;
@@ -30,6 +33,10 @@ export function FixedAppearanceSection({
   setItemSubtextTemplate: (value: string) => void;
   showSubtextOnGifts: boolean;
   setShowSubtextOnGifts: (value: boolean) => void;
+  // SLOT_BUILDER only — FIXED bundles never pass this true
+  showSkipCartOption?: boolean;
+  skipCart?: boolean;
+  setSkipCart?: (value: boolean) => void;
 }) {
   return (
     <BlockStack gap="400">
@@ -85,6 +92,14 @@ export function FixedAppearanceSection({
         onChange={setShowSubtextOnGifts}
         helpText="Turn off to hide the subtext line for items marked as a free gift."
       />
+      {showSkipCartOption && setSkipCart && (
+        <Checkbox
+          label="Skip Cart — go directly to checkout after adding to cart"
+          checked={skipCart}
+          onChange={setSkipCart}
+          helpText="When off, adding this bundle behaves like the theme's own Add to Cart button. When on, the bundle gets its own button that adds to cart and sends the customer straight to checkout."
+        />
+      )}
     </BlockStack>
   );
 }

@@ -1327,9 +1327,9 @@ button.magyx-slot-builder__gift-card {
   padding: 16px 14px;
   background: var(--bc-accent);
   color: #fff;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 20px;
 }
 
 .magyx-slot-builder__cta:disabled {

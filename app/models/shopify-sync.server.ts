@@ -1379,6 +1379,7 @@ interface SlotBuilderPublishInput {
     heading: string;
     accentColor: string;
     showPrices: boolean;
+    skipCart: boolean;
     itemSubtextTemplate: string;
     showSubtextOnGifts: boolean;
   };

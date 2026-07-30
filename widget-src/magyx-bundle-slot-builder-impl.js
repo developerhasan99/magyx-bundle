@@ -1,12 +1,18 @@
 /* Magyx Bundle builder: customer fills every slot from the merchant's
    product pool via a selection modal, then adds the bundle's own parent
-   product to cart. Keeps the theme's native add-to-cart form in control when
-   one exists (same "native form integration" convention as the Bundle
-   Contents and Quantity Breaks widgets) — it just gates that form's submit
-   until every slot is filled, and stamps the customer's picks onto the
-   line as properties for the Cart Transform function to expand and
-   validate. Falls back to its own button only when the theme exposes no
-   compatible form. */
+   product to cart, stamping the customer's picks onto the line as
+   properties for the Cart Transform function to expand and validate.
+   Three add-to-cart modes, decided per render (see `ctaMode`):
+   - Merchant's "Skip Cart" setting on: always our own plain button, raw
+     /cart/add.js fetch, then straight to /checkout.
+   - Off, theme has its own add-to-cart form on the page: no button/form of
+     our own — that native form's submit is gated/stamped instead (same
+     "native form integration" convention as the Bundle Contents and
+     Quantity Breaks widgets), so the theme's own button drives cart/drawer
+     behavior.
+   - Off, no compatible native form found: falls back to our own
+     <product-form>-wrapped form so most themes' generic cart-drawer
+     scripts still pick it up. */
 (function () {
   "use strict";
 
@@ -62,6 +68,14 @@
   // numeric ids; the metafield/proxy data carries GraphQL GIDs.
   function numericId(id) {
     return String(id || "").replace(/\D/g, "");
+  }
+
+  // Bundle Builder's product page is the bundle's own parent product (same
+  // convention as Bundle Contents' magyx-bundle-fixed.js), so its regular
+  // Buy Buttons form — if the merchant kept one on the page — already
+  // targets one of this widget's own package variants.
+  function findNativeAtcForm() {
+    return document.querySelector('form[action*="/cart/add"]');
   }
 
   var CONFETTI_COLORS = ["#ec3b76", "#f7d63d", "#4ade80", "#60a5fa", "#c084fc"];
@@ -218,6 +232,26 @@
         return poolByVariantId[numericId(pkg.variantId)] || [];
       }
 
+      // Three ways this widget's "Add to cart" can work, decided once per
+      // render:
+      // - "checkout": the merchant turned on Skip Cart — always our own
+      //   plain button, raw /cart/add.js fetch, then straight to /checkout.
+      // - "native": Skip Cart is off and the theme has its own add-to-cart
+      //   form on the page — no button/form of our own at all; that native
+      //   form's submit is gated/stamped instead (see the document-level
+      //   listener below), so the theme's own button drives cart/drawer
+      //   behavior, same convention as magyx-bundle-fixed.js.
+      // - "cart": Skip Cart is off and no compatible native form was found —
+      //   falls back to today's own <product-form>-wrapped form so most
+      //   themes' generic cart-drawer scripts still pick it up.
+      var skipCart = !!(data.settings && data.settings.skipCart);
+      var nativeForm = !skipCart ? findNativeAtcForm() : null;
+      // A form with no "id" field can't be synced/gated at all — treat it
+      // the same as no compatible form being found (matches the Quantity
+      // Breaks widget's identical check).
+      if (nativeForm && !nativeForm.querySelector('[name="id"]')) nativeForm = null;
+      var ctaMode = skipCart ? "checkout" : nativeForm ? "native" : "cart";
+
       var html = "";
       html +=
         '<div class="magyx-slot-builder__price" data-sb="price" hidden>' +
@@ -248,25 +282,33 @@
         '<div class="magyx-slot-builder__gifts" data-sb="gifts" hidden></div>';
       html +=
         '<p class="magyx-slot-builder__error" data-sb="error" hidden></p>';
-      // Our own add-to-cart form instead of hijacking the theme's — gives
-      // full control over the button's text/disabled state. `data-type`,
-      // the `/cart/add` action, and the `<product-form>` wrapper match the
-      // markup most Dawn-derived theme cart-drawer scripts scan the page
-      // for (that custom element upgrades ANY `<product-form>` on the
-      // page, not just the theme's own), so most themes pick this up and
-      // AJAX-intercept it same as their own product form; `return_to`
-      // covers themes that don't, falling back to a normal navigation.
-      html +=
-        '<product-form class="magyx-slot-builder__product-form" data-sb="product-form">' +
-        '<form class="magyx-slot-builder__atc-form" data-sb="form" action="/cart/add" method="post" data-type="add-to-cart-form" accept-charset="UTF-8">' +
-        '<input type="hidden" name="id" value="' +
-        numericId(packages[0].variantId) +
-        '" data-sb="variant-id">' +
-        '<input type="hidden" name="quantity" value="1">' +
-        '<input type="hidden" name="return_to" value="/cart">' +
-        '<button type="submit" name="add" class="magyx-slot-builder__cta" data-sb="cta"></button>' +
-        "</form>" +
-        "</product-form>";
+      if (ctaMode === "cart") {
+        // Our own add-to-cart form instead of hijacking the theme's — gives
+        // full control over the button's text/disabled state. `data-type`,
+        // the `/cart/add` action, and the `<product-form>` wrapper match the
+        // markup most Dawn-derived theme cart-drawer scripts scan the page
+        // for (that custom element upgrades ANY `<product-form>` on the
+        // page, not just the theme's own), so most themes pick this up and
+        // AJAX-intercept it same as their own product form; `return_to`
+        // covers themes that don't, falling back to a normal navigation.
+        html +=
+          '<product-form class="magyx-slot-builder__product-form" data-sb="product-form">' +
+          '<form class="magyx-slot-builder__atc-form" data-sb="form" action="/cart/add" method="post" data-type="add-to-cart-form" accept-charset="UTF-8">' +
+          '<input type="hidden" name="id" value="' +
+          numericId(packages[0].variantId) +
+          '" data-sb="variant-id">' +
+          '<input type="hidden" name="quantity" value="1">' +
+          '<input type="hidden" name="return_to" value="/cart">' +
+          '<button type="submit" name="add" class="magyx-slot-builder__cta" data-sb="cta"></button>' +
+          "</form>" +
+          "</product-form>";
+      } else if (ctaMode === "checkout") {
+        // No form at all — a raw fetch + redirect to /checkout below.
+        html +=
+          '<button type="button" class="magyx-slot-builder__cta" data-sb="cta"></button>';
+      }
+      // ctaMode === "native": no button/form of our own — the theme's own
+      // add-to-cart form and button (already on the page) do this instead.
       html +=
         '<div class="magyx-slot-builder-modal" data-sb="modal" hidden>' +
         '<div class="magyx-slot-builder-modal__overlay" data-sb="overlay"></div>' +
@@ -383,9 +425,24 @@
         selections.clear();
         renderPacks();
         update();
-        var pkgAfter = activePackage();
-        if (variantIdInput && pkgAfter.variantId) {
-          variantIdInput.value = numericId(pkgAfter.variantId);
+        syncActiveVariant();
+      }
+
+      // Points whichever form is actually going to submit (ours, or the
+      // theme's native one) at the active package's variant. Called on pack
+      // switch and once up front, in case the theme's default variant isn't
+      // packages[0].
+      function syncActiveVariant() {
+        var pkg = activePackage();
+        if (!pkg.variantId) return;
+        if (ctaMode === "native") {
+          var idField = nativeForm.elements["id"];
+          if (idField) {
+            idField.value = numericId(pkg.variantId);
+            idField.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        } else if (variantIdInput) {
+          variantIdInput.value = numericId(pkg.variantId);
         }
       }
 
@@ -1078,19 +1135,33 @@
         openModal();
       }
 
-      function injectProperties(form) {
-        form
-          .querySelectorAll("[data-magyx-slot-builder-property]")
-          .forEach(function (el) {
-            el.remove();
-          });
+      // Shared source of truth for both the hidden-input form path
+      // (injectProperties) and the raw-fetch JSON path (checkout mode).
+      function allProperties() {
         var props = buildProperties();
         props.push({ key: "_magyx_slot_bundle_id", value: data.bundleId });
         props.push({
           key: "_magyx_slot_selection",
           value: JSON.stringify(selectionArray()),
         });
-        props.forEach(function (property) {
+        return props;
+      }
+
+      function propertiesObject() {
+        var obj = {};
+        allProperties().forEach(function (property) {
+          obj[property.key] = property.value;
+        });
+        return obj;
+      }
+
+      function injectProperties(form) {
+        form
+          .querySelectorAll("[data-magyx-slot-builder-property]")
+          .forEach(function (el) {
+            el.remove();
+          });
+        allProperties().forEach(function (property) {
           var input = document.createElement("input");
           input.type = "hidden";
           input.name = "properties[" + property.key + "]";
@@ -1100,28 +1171,91 @@
         });
       }
 
-      formEl.addEventListener("submit", function (event) {
-        if (remaining() > 0) {
-          event.preventDefault();
-          showIncompleteError();
-          return;
-        }
-        injectProperties(formEl);
-        var originalLabel = ctaBtn.textContent;
-        ctaBtn.disabled = true;
-        ctaBtn.textContent = "Adding…";
-        // Most themes intercept this submit for their own AJAX cart drawer
-        // and never actually navigate away, so the button needs resetting
-        // by hand; a theme with no such interception just navigates to
-        // `return_to` before this ever fires.
-        setTimeout(function () {
-          ctaBtn.disabled = false;
-          ctaBtn.textContent = originalLabel;
-        }, 1500);
-      });
+      if (ctaMode === "cart") {
+        formEl.addEventListener("submit", function (event) {
+          if (remaining() > 0) {
+            event.preventDefault();
+            showIncompleteError();
+            return;
+          }
+          injectProperties(formEl);
+          var originalLabel = ctaBtn.textContent;
+          ctaBtn.disabled = true;
+          ctaBtn.textContent = "Adding…";
+          // Most themes intercept this submit for their own AJAX cart drawer
+          // and never actually navigate away, so the button needs resetting
+          // by hand; a theme with no such interception just navigates to
+          // `return_to` before this ever fires.
+          setTimeout(function () {
+            ctaBtn.disabled = false;
+            ctaBtn.textContent = originalLabel;
+          }, 1500);
+        });
+      } else if (ctaMode === "native") {
+        // Global + capturing so this fires before the theme's own submit
+        // handling, and works no matter how the theme re-renders/replaces
+        // its variant picker form. Matches the variant id against this
+        // bundle's own packages so an unrelated form elsewhere on the page
+        // (e.g. a recommendations block) is never intercepted.
+        var packageVariantIds = packages.map(function (pkg) {
+          return numericId(pkg.variantId);
+        });
+        document.addEventListener(
+          "submit",
+          function (event) {
+            var form = event.target;
+            if (!(form instanceof HTMLFormElement)) return;
+            if (!/\/cart\/add/.test(form.action)) return;
+            var idField = form.elements["id"];
+            var variantId = idField ? numericId(idField.value) : null;
+            if (!variantId || packageVariantIds.indexOf(variantId) === -1) return;
+            if (remaining() > 0) {
+              event.preventDefault();
+              showIncompleteError();
+              return;
+            }
+            injectProperties(form);
+          },
+          true,
+        );
+      } else if (ctaMode === "checkout") {
+        ctaBtn.addEventListener("click", function () {
+          if (remaining() > 0) {
+            showIncompleteError();
+            return;
+          }
+          var pkg = activePackage();
+          var originalLabel = ctaBtn.textContent;
+          ctaBtn.disabled = true;
+          ctaBtn.textContent = "Adding…";
+          fetch("/cart/add.js", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [
+                {
+                  id: parseInt(numericId(pkg.variantId), 10),
+                  quantity: 1,
+                  properties: propertiesObject(),
+                },
+              ],
+            }),
+          })
+            .then(function (response) {
+              if (!response.ok) throw new Error("add failed");
+              window.location.href = "/checkout";
+            })
+            .catch(function () {
+              ctaBtn.disabled = false;
+              ctaBtn.textContent = originalLabel;
+              alert("Sorry, we couldn't add this to your cart. Please try again.");
+            });
+        });
+      }
 
       renderPacks();
       update();
+      if (ctaMode === "native") syncActiveVariant();
     }
   }
 

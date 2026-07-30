@@ -282,6 +282,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       widgetHeading: bundle.widgetHeading,
       accentColor: bundle.accentColor,
       showPrices: bundle.showPrices,
+      skipCart: bundle.skipCart,
       itemSubtextTemplate: bundle.itemSubtextTemplate,
       showSubtextOnGifts: bundle.showSubtextOnGifts,
       freeShipping: bundle.freeShipping,
@@ -532,6 +533,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             heading: bundle.widgetHeading,
             accentColor: bundle.accentColor,
             showPrices: bundle.showPrices,
+            skipCart: bundle.skipCart,
             itemSubtextTemplate: bundle.itemSubtextTemplate,
             showSubtextOnGifts: bundle.showSubtextOnGifts,
           },
@@ -605,6 +607,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
     widgetHeading: bundle?.widgetHeading ?? (type === "SLOT_BUILDER" ? "" : "What's inside"),
     accentColor: bundle?.accentColor ?? "#1a1a1a",
     showPrices: bundle?.showPrices ?? false,
+    skipCart: bundle?.skipCart ?? false,
     itemSubtextTemplate: bundle?.itemSubtextTemplate ?? "",
     showSubtextOnGifts: bundle?.showSubtextOnGifts ?? true,
     freeShipping: bundle?.freeShipping ?? false,
@@ -727,6 +730,7 @@ export default function BundleBuilder() {
   const [widgetHeading, setWidgetHeading] = useState(initialForm.widgetHeading);
   const [accentColor, setAccentColor] = useState(initialForm.accentColor);
   const [showPrices, setShowPrices] = useState(initialForm.showPrices);
+  const [skipCart, setSkipCart] = useState(initialForm.skipCart);
   const [itemSubtextTemplate, setItemSubtextTemplate] = useState(
     initialForm.itemSubtextTemplate,
   );
@@ -925,7 +929,7 @@ export default function BundleBuilder() {
     () =>
       JSON.stringify({
         title, type, status, pricingType, pricingValue, widgetStyle,
-        widgetHeading, accentColor, showPrices, itemSubtextTemplate,
+        widgetHeading, accentColor, showPrices, skipCart, itemSubtextTemplate,
         showSubtextOnGifts, freeShipping, items,
         packages: stripCollectionPoolItems(packages),
         collections, collectionPoolItems, poolSource,
@@ -937,7 +941,7 @@ export default function BundleBuilder() {
       }),
     [
       initialForm, title, type, status, pricingType, pricingValue,
-      widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
+      widgetStyle, widgetHeading, accentColor, showPrices, skipCart, itemSubtextTemplate,
       showSubtextOnGifts, freeShipping, items, packages, collections,
       collectionPoolItems, poolSource,
       minItems, maxItems, tiers, qbTiers,
@@ -961,6 +965,7 @@ export default function BundleBuilder() {
       setWidgetHeading(form.widgetHeading);
       setAccentColor(form.accentColor);
       setShowPrices(form.showPrices);
+      setSkipCart(form.skipCart);
       setItemSubtextTemplate(form.itemSubtextTemplate);
       setShowSubtextOnGifts(form.showSubtextOnGifts);
       setFreeShipping(form.freeShipping);
@@ -1323,6 +1328,7 @@ export default function BundleBuilder() {
       widgetHeading,
       accentColor,
       showPrices,
+      skipCart,
       itemSubtextTemplate,
       showSubtextOnGifts,
       freeShipping,
@@ -1821,6 +1827,9 @@ export default function BundleBuilder() {
                     setItemSubtextTemplate={setItemSubtextTemplate}
                     showSubtextOnGifts={showSubtextOnGifts}
                     setShowSubtextOnGifts={setShowSubtextOnGifts}
+                    showSkipCartOption={type === "SLOT_BUILDER"}
+                    skipCart={skipCart}
+                    setSkipCart={setSkipCart}
                   />
                 </Card>
               )}
