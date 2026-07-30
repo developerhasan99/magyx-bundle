@@ -1,4 +1,17 @@
-import { Text, Badge } from "@shopify/polaris";
+import { Text } from "@shopify/polaris";
+
+// Solid, full-contrast colors matching the storefront widget's own badge
+// palette (magyx-bundle.css's `--pack-badge--*`/`--tier-badge--*` rules) —
+// kept in sync by hand so this preview shows merchants exactly what
+// customers will see, not Polaris's default pale-tint Badge styling.
+const BADGE_TONE_COLORS: Record<string, string> = {
+  success: "#16a34a",
+  info: "#2563eb",
+  attention: "#ea580c",
+  warning: "#d97706",
+  critical: "#dc2626",
+  new: "#9333ea",
+};
 
 // Pill-style tab used by both FIXED packages and QUANTITY_BREAKS pack sizes.
 export function PackageTab({
@@ -20,6 +33,7 @@ export function PackageTab({
       onClick={onSelect}
       aria-pressed={selected}
       style={{
+        position: "relative",
         display: "flex",
         alignItems: "center",
         gap: "var(--p-space-150)",
@@ -28,7 +42,7 @@ export function PackageTab({
         border: selected
           ? "2px solid var(--p-color-border-emphasis)"
           : "1px solid var(--p-color-border)",
-        margin: selected ? 0 : 1,
+        margin: selected ? "10px 1px 0" : "11px 1px 0",
         background: selected
           ? "var(--p-color-bg-surface-selected)"
           : "var(--p-color-bg-surface)",
@@ -41,9 +55,29 @@ export function PackageTab({
         {label || "Untitled package"}
       </Text>
       {badgeText && (
-        <Badge tone={(badgeTone || undefined) as "info" | "success" | "attention" | "warning" | "critical" | "new" | undefined} size="small">
+        // Floats above the tab like the storefront gift cards' "VALUE" tag,
+        // instead of sitting inline next to the label where long text wraps.
+        <span
+          style={{
+            position: "absolute",
+            top: -10,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 1,
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "2px 8px",
+            borderRadius: 999,
+            fontSize: 11,
+            fontWeight: 700,
+            lineHeight: 1.4,
+            color: "#fff",
+            background: BADGE_TONE_COLORS[badgeTone] ?? "#4a4a4a",
+            whiteSpace: "nowrap",
+          }}
+        >
           {badgeText}
-        </Badge>
+        </span>
       )}
     </button>
   );

@@ -404,16 +404,16 @@
             index === activePackageIndex ? "true" : "false",
           );
           var badge = pkg.badgeText
-            ? ' <span class="magyx-slot-builder__pack-badge magyx-slot-builder__pack-badge--' +
+            ? '<span class="magyx-slot-builder__pack-badge magyx-slot-builder__pack-badge--' +
               escapeHtml(pkg.badgeTone || "info") +
               '">' +
               escapeHtml(pkg.badgeText) +
               "</span>"
             : "";
           tab.innerHTML =
+            badge +
             '<span class="magyx-slot-builder__pack-tab-label">' +
             escapeHtml(pkg.label) +
-            badge +
             "</span>" +
             (pkg.price != null
               ? '<span class="magyx-slot-builder__pack-tab-price">' +

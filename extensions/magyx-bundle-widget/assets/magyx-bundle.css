@@ -297,12 +297,12 @@
   background: rgba(255, 255, 255, 0.25);
 }
 
-.magyx-bundle-contents__pack-badge--success { background: #d4f4dd; color: #0f5c2e; }
-.magyx-bundle-contents__pack-badge--info { background: #d7ebfc; color: #0a4a7a; }
-.magyx-bundle-contents__pack-badge--attention { background: #ffe9c2; color: #7a4a00; }
-.magyx-bundle-contents__pack-badge--warning { background: #fff1c2; color: #6b5200; }
-.magyx-bundle-contents__pack-badge--critical { background: #fbdada; color: #7a1010; }
-.magyx-bundle-contents__pack-badge--new { background: #e6dcfb; color: #4a2a8a; }
+.magyx-bundle-contents__pack-badge--success { background: #16a34a; color: #fff; }
+.magyx-bundle-contents__pack-badge--info { background: #2563eb; color: #fff; }
+.magyx-bundle-contents__pack-badge--attention { background: #ea580c; color: #fff; }
+.magyx-bundle-contents__pack-badge--warning { background: #d97706; color: #fff; }
+.magyx-bundle-contents__pack-badge--critical { background: #dc2626; color: #fff; }
+.magyx-bundle-contents__pack-badge--new { background: #9333ea; color: #fff; }
 
 .magyx-bundle-contents__pack-tab--active .magyx-bundle-contents__pack-badge--success,
 .magyx-bundle-contents__pack-tab--active .magyx-bundle-contents__pack-badge--info,
@@ -749,12 +749,12 @@
   white-space: nowrap;
 }
 
-.magyx-quantity-breaks__tier-badge--success { background: #d4f4dd; color: #0f5c2e; }
-.magyx-quantity-breaks__tier-badge--info { background: #d7ebfc; color: #0a4a7a; }
-.magyx-quantity-breaks__tier-badge--attention { background: #ffe9c2; color: #7a4a00; }
-.magyx-quantity-breaks__tier-badge--warning { background: #fff1c2; color: #6b5200; }
-.magyx-quantity-breaks__tier-badge--critical { background: #fbdada; color: #7a1010; }
-.magyx-quantity-breaks__tier-badge--new { background: #e6dcfb; color: #4a2a8a; }
+.magyx-quantity-breaks__tier-badge--success { background: #16a34a; color: #fff; }
+.magyx-quantity-breaks__tier-badge--info { background: #2563eb; color: #fff; }
+.magyx-quantity-breaks__tier-badge--attention { background: #ea580c; color: #fff; }
+.magyx-quantity-breaks__tier-badge--warning { background: #d97706; color: #fff; }
+.magyx-quantity-breaks__tier-badge--critical { background: #dc2626; color: #fff; }
+.magyx-quantity-breaks__tier-badge--new { background: #9333ea; color: #fff; }
 
 .magyx-quantity-breaks__tier-price {
   flex-shrink: 0;
@@ -882,16 +882,19 @@
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 16px;
+  /* Room for the floating badge above each tab, same reasoning as the gift
+     cards grid's own top padding. */
+  margin: 10px 0 16px;
 }
 
 .magyx-slot-builder__pack-tab {
+  position: relative;
   flex: 1 1 0;
   min-width: 96px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  border: 1px solid var(--bc-border);
+  border: 2px solid var(--bc-border);
   border-radius: var(--bc-radius);
   padding: 16px 12px;
   background: #fff;
@@ -907,8 +910,6 @@
 
 .magyx-slot-builder__pack-tab--active {
   border-color: var(--bc-accent);
-  background: var(--bc-accent);
-  color: #fff;
 }
 
 .magyx-slot-builder__pack-tab-label {
@@ -926,29 +927,27 @@
   opacity: 0.85;
 }
 
+/* Floats above the tab like the gift cards' "VALUE" tag, instead of sitting
+   inline next to the label where long badge text used to wrap awkwardly. */
 .magyx-slot-builder__pack-badge {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
   border-radius: 999px;
-  padding: 1px 8px;
-  font-size: 0.85em;
-  margin-left: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
-.magyx-slot-builder__pack-badge--success { background: #d4f4dd; color: #0f5c2e; }
-.magyx-slot-builder__pack-badge--info { background: #d7ebfc; color: #0a4a7a; }
-.magyx-slot-builder__pack-badge--attention { background: #ffe9c2; color: #7a4a00; }
-.magyx-slot-builder__pack-badge--warning { background: #fff1c2; color: #6b5200; }
-.magyx-slot-builder__pack-badge--critical { background: #fbdada; color: #7a1010; }
-.magyx-slot-builder__pack-badge--new { background: #e6dcfb; color: #4a2a8a; }
-
-.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--success,
-.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--info,
-.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--attention,
-.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--warning,
-.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--critical,
-.magyx-slot-builder__pack-tab--active .magyx-slot-builder__pack-badge--new {
-  background: rgba(255, 255, 255, 0.25);
-  color: #fff;
-}
+.magyx-slot-builder__pack-badge--success { background: #16a34a; color: #fff; }
+.magyx-slot-builder__pack-badge--info { background: #2563eb; color: #fff; }
+.magyx-slot-builder__pack-badge--attention { background: #ea580c; color: #fff; }
+.magyx-slot-builder__pack-badge--warning { background: #d97706; color: #fff; }
+.magyx-slot-builder__pack-badge--critical { background: #dc2626; color: #fff; }
+.magyx-slot-builder__pack-badge--new { background: #9333ea; color: #fff; }
 
 .magyx-slot-builder__progress {
   font-weight: 600;
