@@ -1,8 +1,10 @@
-import { useNavigate } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { useFetcher } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import { Page, Layout, Card, BlockStack, Text } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
+import { createBundle, type BundleType } from "../models/bundle.server";
 import { BundleTypeCard } from "../components/BundleTypeCard";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -36,8 +38,48 @@ const BUNDLE_TYPE_CHOICES = [
   },
 ] as const;
 
+// Picking a type creates the draft immediately (rather than deferring to the
+// editor's first save) so the merchant lands on /app/bundles/:id right away —
+// a mid-edit reload reopens the same draft instead of losing everything on
+// the stateless /new route. Defaults mirror the editor's formStateOf()
+// fallbacks so the editor opens looking identical to the old "new" screen.
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { session } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const type = String(formData.get("type") ?? "");
+  if (!BUNDLE_TYPE_CHOICES.some((choice) => choice.value === type)) {
+    throw new Response("Unknown bundle type", { status: 400 });
+  }
+
+  const bundle = await createBundle(session.shop, {
+    // Left empty so the editor still forces the merchant to name the bundle
+    // before saving; list views render an "Untitled bundle" fallback.
+    title: "",
+    type: type as BundleType,
+    status: "DRAFT",
+    pricingType: type === "MIX_MATCH" ? "PERCENT_OFF" : "FIXED_PRICE",
+    pricingValue: 0,
+    widgetStyle: "numbered",
+    widgetHeading: type === "SLOT_BUILDER" ? "" : "What's inside",
+    accentColor: "#1a1a1a",
+    showPrices: false,
+    skipCart: false,
+    itemSubtextTemplate: "",
+    showSubtextOnGifts: true,
+    freeShipping: false,
+    quantityBreakScope: "PRODUCTS",
+    items: [],
+    packages: [],
+    tiers: [],
+    rule: null,
+  });
+
+  return redirect(`/app/bundles/${bundle.id}`);
+};
+
 export default function CreateBundle() {
-  const navigate = useNavigate();
+  const fetcher = useFetcher<typeof action>();
+  const creating = fetcher.state !== "idle";
 
   return (
     <Page backAction={{ content: "Home", url: "/app" }} title="Create bundle">
@@ -59,6 +101,7 @@ export default function CreateBundle() {
                   display: "grid",
                   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
                   gap: "var(--p-space-300)",
+                  opacity: creating ? 0.6 : 1,
                 }}
               >
                 {BUNDLE_TYPE_CHOICES.map((option) => (
@@ -66,9 +109,13 @@ export default function CreateBundle() {
                     key={option.value}
                     label={option.label}
                     description={option.description}
-                    selected={false}
-                    disabled={false}
-                    onSelect={() => navigate(`/app/bundles/new?type=${option.value}`)}
+                    selected={
+                      creating && fetcher.formData?.get("type") === option.value
+                    }
+                    disabled={creating}
+                    onSelect={() =>
+                      fetcher.submit({ type: option.value }, { method: "POST" })
+                    }
                   />
                 ))}
               </div>

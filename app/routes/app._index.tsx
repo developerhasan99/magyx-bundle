@@ -237,7 +237,7 @@ export default function Dashboard() {
                       >
                         <IndexTable.Cell>
                           <Text as="span" variant="bodyMd" fontWeight="semibold">
-                            {bundle.title}
+                            {bundle.title || "Untitled bundle"}
                           </Text>
                         </IndexTable.Cell>
                         <IndexTable.Cell>
