@@ -1431,7 +1431,7 @@ export default function BundleBuilder() {
     );
   }, [
     fetcher, title, description, type, status, pricingType, pricingValue,
-    widgetStyle, widgetHeading, accentColor, showPrices, itemSubtextTemplate,
+    widgetStyle, widgetHeading, accentColor, showPrices, skipCart, itemSubtextTemplate,
     showSubtextOnGifts, freeShipping, items, packages, minItems, maxItems, tiers, poolSource,
     collections, qbTiers,
   ]);

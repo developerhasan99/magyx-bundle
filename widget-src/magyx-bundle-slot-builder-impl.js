@@ -600,10 +600,11 @@
       /* ---- Progressive free gifts --------------------------------------
          Every package's gifts render as cards: the active package's own and
          every earlier package's are UNLOCKED — hidden behind a cosmetic
-         scratch-off foil the shopper can rub away — while later packages'
-         stay LOCKED (blurred, padlock) to nudge them toward the bigger
-         pack; clicking a locked card switches to the package that unlocks
-         it. Purely presentational: checkout truth is the cumulative gift
+         scratch-off foil the shopper can rub away. The active package's own
+         gifts stay LOCKED (blurred, padlock) until its slots are filled,
+         while later packages' render as EXCLUSIVE (light gray, padlock,
+         "{Package} Exclusive") to nudge shoppers toward the bigger pack;
+         clicking an exclusive card switches to the package that unlocks it. Purely presentational: checkout truth is the cumulative gift
          list baked into the shop config metafield at sync time, so unlocked
          gifts are added to the order whether or not they're scratched. */
 
@@ -769,28 +770,24 @@
         // active package's own slots are filled — picking the "3 Pack" tab
         // isn't enough on its own, the shopper still has to fill it.
         var slotsFilled = remaining() === 0;
-        var tierLockedCount = 0;
-        var nextUnlockIndex = null;
 
         entries.forEach(function (entry) {
           var gift = entry.gift;
           var tierReached = entry.unlockIndex <= activePackageIndex;
           var unlocked = tierReached && slotsFilled;
           var lockedByTier = !tierReached;
-          if (lockedByTier) {
-            tierLockedCount += 1;
-            if (nextUnlockIndex === null || entry.unlockIndex < nextUnlockIndex) {
-              nextUnlockIndex = entry.unlockIndex;
-            }
-          }
 
           var titleText = gift.isShipping ? "Free Shipping" : gift.title;
+          var unlockPkg = packages[entry.unlockIndex];
+          var lockLabel =
+            unlockPkg && unlockPkg.label ? unlockPkg.label + " Exclusive" : "Locked";
 
           var card = document.createElement(unlocked ? "div" : "button");
           if (!unlocked) card.type = "button";
           card.className =
             "magyx-slot-builder__gift-card" +
-            (unlocked ? "" : " magyx-slot-builder__gift-card--locked");
+            (unlocked ? "" : " magyx-slot-builder__gift-card--locked") +
+            (lockedByTier ? " magyx-slot-builder__gift-card--exclusive" : "");
           card.title = (gift.quantity > 1 ? gift.quantity + " × " : "") + titleText;
 
           var quantity = gift.quantity || 1;
@@ -822,9 +819,14 @@
               : "") +
             (unlocked
               ? ""
-              : '<span class="magyx-slot-builder__gift-lock">' +
-                '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>' +
-                "LOCKED</span>") +
+              : lockedByTier
+                ? '<span class="magyx-slot-builder__gift-lock">' +
+                  '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path><circle cx="12" cy="15.5" r="1.5" fill="currentColor" stroke="none"></circle></svg>' +
+                  escapeHtml(lockLabel) +
+                  "</span>"
+                : '<span class="magyx-slot-builder__gift-lock">' +
+                  '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>' +
+                  "LOCKED</span>") +
             "</div>" +
             (unlocked
               ? '<p class="magyx-slot-builder__gift-title"' +
@@ -852,21 +854,6 @@
           }
           cards.appendChild(card);
         });
-
-        if (tierLockedCount > 0) {
-          var unlockPkg = packages[nextUnlockIndex];
-          var hint = document.createElement("p");
-          hint.className = "magyx-slot-builder__gifts-hint";
-          hint.textContent =
-            "Choose " +
-            ((unlockPkg && unlockPkg.label) || "a bigger pack") +
-            " to unlock " +
-            tierLockedCount +
-            " more free gift" +
-            (tierLockedCount === 1 ? "" : "s") +
-            "!";
-          giftsEl.appendChild(hint);
-        }
       }
 
       // Shared by our own CTA button and (in "native" mode) the theme's own
