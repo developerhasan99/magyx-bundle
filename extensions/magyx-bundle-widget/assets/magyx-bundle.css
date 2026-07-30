@@ -1173,6 +1173,8 @@ button.magyx-slot-builder__gift-card {
   height: 100%;
   object-fit: cover;
   display: block;
+  border: var(--bc-accent) 2px solid;
+  border-radius: 14px;
 }
 
 .magyx-slot-builder__gift-image--shipping {
@@ -1197,6 +1199,39 @@ button.magyx-slot-builder__gift-card {
 
 .magyx-slot-builder__gift-title[hidden] {
   display: none;
+}
+
+/* Confetti burst — a brief celebratory pop the instant a gift's foil
+   finishes scratching off. Purely decorative, self-removing. */
+.magyx-slot-builder__confetti {
+  position: absolute;
+  inset: -32px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.magyx-slot-builder__confetti-piece {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  /* Diamond/rhombus cut — kept separate from the burst animation's own
+     rotation below so the two don't fight each other. */
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  opacity: 0;
+  animation: magyx-slot-builder-confetti-burst 0.7s ease-out forwards;
+}
+
+@keyframes magyx-slot-builder-confetti-burst {
+  0% {
+    transform: translate(-50%, -50%) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) rotate(var(--rot)) scale(0.6);
+    opacity: 0;
+  }
 }
 
 .magyx-slot-builder__gift-qty {

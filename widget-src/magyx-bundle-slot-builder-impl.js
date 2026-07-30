@@ -64,6 +64,42 @@
     return String(id || "").replace(/\D/g, "");
   }
 
+  var CONFETTI_COLORS = ["#ec3b76", "#f7d63d", "#4ade80", "#60a5fa", "#c084fc"];
+
+  // A small burst of colored squares flung outward from the center of
+  // `container` — the "mild surprise" moment right after a gift card is
+  // fully scratched. Self-removing; skipped entirely for shoppers who've
+  // asked their OS for reduced motion.
+  function burstConfetti(container) {
+    if (
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+    var wrap = document.createElement("div");
+    wrap.className = "magyx-slot-builder__confetti";
+    var pieceCount = 14;
+    for (var i = 0; i < pieceCount; i++) {
+      var piece = document.createElement("span");
+      piece.className = "magyx-slot-builder__confetti-piece";
+      var angle = Math.random() * Math.PI * 2;
+      var distance = 38 + Math.random() * 46;
+      piece.style.setProperty("--dx", (Math.cos(angle) * distance).toFixed(1) + "px");
+      // Biased upward (negative y) so the burst reads as "popping up", not
+      // just scattering flat.
+      piece.style.setProperty("--dy", (Math.sin(angle) * distance - 22).toFixed(1) + "px");
+      piece.style.setProperty("--rot", Math.round((Math.random() - 0.5) * 480) + "deg");
+      piece.style.background = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+      piece.style.animationDelay = Math.round(Math.random() * 60) + "ms";
+      wrap.appendChild(piece);
+    }
+    container.appendChild(wrap);
+    setTimeout(function () {
+      wrap.remove();
+    }, 900);
+  }
+
   function readData(root) {
     var script = root.querySelector("[data-magyx-slot-builder-data]");
     if (!script) return null;
@@ -646,6 +682,7 @@
           var card = body.parentElement;
           var titleEl = card && card.querySelector(".magyx-slot-builder__gift-title");
           if (titleEl) titleEl.hidden = false;
+          if (card) burstConfetti(card);
           setTimeout(function () {
             canvas.remove();
           }, 400);
