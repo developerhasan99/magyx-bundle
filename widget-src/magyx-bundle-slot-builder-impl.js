@@ -221,7 +221,7 @@
         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>' +
         "Add Items</button>";
       html +=
-        '<p class="magyx-slot-builder__gifts" data-sb="gifts" hidden></p>';
+        '<div class="magyx-slot-builder__gifts" data-sb="gifts" hidden></div>';
       html +=
         '<p class="magyx-slot-builder__error" data-sb="error" hidden></p>';
       if (!hasNativeButton) {
@@ -331,6 +331,27 @@
         return props;
       }
 
+      // Shared by the pack tabs and locked gift cards (clicking a locked
+      // gift jumps to the package that unlocks it). Each package has its own
+      // pool and slot count, so a prior package's picks don't carry over —
+      // keeps totals/eligibility unambiguous rather than trying to partially
+      // remap them.
+      function selectPackage(index) {
+        if (index === activePackageIndex) return;
+        activePackageIndex = index;
+        selections.clear();
+        renderPacks();
+        update();
+        var pkgAfter = activePackage();
+        if (nativeForm && pkgAfter.variantId) {
+          var idField = nativeForm.querySelector('[name="id"]');
+          if (idField) {
+            idField.value = numericId(pkgAfter.variantId);
+            idField.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
+      }
+
       function renderPacks() {
         var container = stateEl.querySelector('[data-sb="packs"]');
         if (!container) return;
@@ -364,23 +385,7 @@
                 "/ea</span>"
               : "");
           tab.addEventListener("click", function () {
-            if (index === activePackageIndex) return;
-            // Each package has its own pool and slot count, so a prior
-            // package's picks don't carry over — keeps totals/eligibility
-            // unambiguous rather than trying to partially remap them.
-            activePackageIndex = index;
-            selections.clear();
-            renderPacks();
-            renderGifts();
-            update();
-            var pkgAfter = activePackage();
-            if (nativeForm && pkgAfter.variantId) {
-              var idField = nativeForm.querySelector('[name="id"]');
-              if (idField) {
-                idField.value = numericId(pkgAfter.variantId);
-                idField.dispatchEvent(new Event("change", { bubbles: true }));
-              }
-            }
+            selectPackage(index);
           });
           container.appendChild(tab);
         });
@@ -522,21 +527,275 @@
         }
       }
 
+      /* ---- Progressive free gifts --------------------------------------
+         Every package's gifts render as cards: the active package's own and
+         every earlier package's are UNLOCKED — hidden behind a cosmetic
+         scratch-off foil the shopper can rub away — while later packages'
+         stay LOCKED (blurred, padlock) to nudge them toward the bigger
+         pack; clicking a locked card switches to the package that unlocks
+         it. Purely presentational: checkout truth is the cumulative gift
+         list baked into the shop config metafield at sync time, so unlocked
+         gifts are added to the order whether or not they're scratched. */
+
+      // Revealed foils, keyed by gift — survives package switches so an
+      // already-scratched gift never re-covers itself.
+      var scratchedGifts = {};
+
+      // Flattens every package's own gifts in unlock (tab) order, deduped by
+      // variantId — the earliest package's entry wins, mirroring checkout's
+      // cumulative merge. A package with free shipping enabled contributes
+      // one extra virtual "gift" card (no variant/price, just a shipping
+      // icon) the first time it turns on, so the perk shows up in the same
+      // scratch-to-reveal flow as product gifts.
+      function progressiveGifts() {
+        var seen = {};
+        var entries = [];
+        var shippingAdded = false;
+        packages.forEach(function (pkg, pkgIndex) {
+          (((pkg && pkg.gifts) || [])).forEach(function (gift, giftIndex) {
+            var key = String(gift.variantId || pkgIndex + ":" + giftIndex);
+            if (seen[key]) return;
+            seen[key] = true;
+            entries.push({ key: key, gift: gift, unlockIndex: pkgIndex });
+          });
+          if (pkg && pkg.freeShipping && !shippingAdded) {
+            shippingAdded = true;
+            entries.push({
+              key: "free-shipping",
+              gift: { title: "Free Shipping", isShipping: true, quantity: 1, price: null },
+              unlockIndex: pkgIndex,
+            });
+          }
+        });
+        return entries;
+      }
+
+      // Rubbing erases the foil (destination-out strokes); once ~40% is
+      // gone the whole thing fades out and the gift stays revealed.
+      function attachScratchFoil(body, key) {
+        var canvas = document.createElement("canvas");
+        canvas.className = "magyx-slot-builder__gift-foil";
+        body.appendChild(canvas);
+        var ctx = canvas.getContext("2d");
+        var scratching = false;
+        var lastPoint = null;
+        var revealed = false;
+
+        function paint() {
+          var rect = body.getBoundingClientRect();
+          if (rect.width === 0) return;
+          var dpr = window.devicePixelRatio || 1;
+          canvas.width = Math.round(rect.width * dpr);
+          canvas.height = Math.round(rect.height * dpr);
+          ctx.scale(dpr, dpr);
+          var w = rect.width;
+          var h = rect.height;
+          ctx.fillStyle = "#f7d63d";
+          ctx.fillRect(0, 0, w, h);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = Math.round(Math.min(w, h) * 0.32) + "px serif";
+          ctx.fillText("🎁", w / 2, h * 0.38);
+          ctx.fillStyle = "#1a1a1a";
+          ctx.font = "800 " + Math.max(12, Math.round(w * 0.13)) + "px sans-serif";
+          ctx.fillText("SCRATCH", w / 2, h * 0.76);
+        }
+        // Deferred a frame: the card isn't laid out (zero-sized) until it's
+        // actually in the document.
+        requestAnimationFrame(paint);
+
+        function pointFrom(event) {
+          var rect = canvas.getBoundingClientRect();
+          return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        }
+
+        function scratchTo(point) {
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.lineWidth = 26;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(lastPoint ? lastPoint.x : point.x, lastPoint ? lastPoint.y : point.y);
+          ctx.lineTo(point.x, point.y);
+          ctx.stroke();
+          lastPoint = point;
+        }
+
+        // Once 60% of the foil is rubbed away, the rest auto-clears — the
+        // shopper doesn't have to scratch every last pixel by hand.
+        var REVEAL_THRESHOLD = 0.6;
+
+        function scratchedRatio() {
+          var data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          var cleared = 0;
+          var total = 0;
+          // Every 16th pixel's alpha is plenty to estimate coverage
+          for (var i = 3; i < data.length; i += 64) {
+            total += 1;
+            if (data[i] === 0) cleared += 1;
+          }
+          return total > 0 ? cleared / total : 0;
+        }
+
+        function reveal() {
+          if (revealed) return;
+          revealed = true;
+          scratchedGifts[key] = true;
+          canvas.classList.add("magyx-slot-builder__gift-foil--revealed");
+          // `body`'s parent is the card element, which also holds the title
+          // heading rendered (but hidden) alongside it — see renderGifts.
+          var card = body.parentElement;
+          var titleEl = card && card.querySelector(".magyx-slot-builder__gift-title");
+          if (titleEl) titleEl.hidden = false;
+          setTimeout(function () {
+            canvas.remove();
+          }, 400);
+        }
+
+        canvas.addEventListener("pointerdown", function (event) {
+          scratching = true;
+          lastPoint = null;
+          if (canvas.setPointerCapture) canvas.setPointerCapture(event.pointerId);
+          scratchTo(pointFrom(event));
+          if (scratchedRatio() >= REVEAL_THRESHOLD) reveal();
+        });
+        canvas.addEventListener("pointermove", function (event) {
+          if (!scratching || revealed) return;
+          scratchTo(pointFrom(event));
+          // Checked live so the auto-clear fires mid-scratch, not only once
+          // the shopper lifts their finger/mouse.
+          if (scratchedRatio() >= REVEAL_THRESHOLD) reveal();
+        });
+        canvas.addEventListener("pointerup", function () {
+          scratching = false;
+          lastPoint = null;
+          if (scratchedRatio() >= REVEAL_THRESHOLD) reveal();
+        });
+        canvas.addEventListener("pointercancel", function () {
+          scratching = false;
+          lastPoint = null;
+        });
+      }
+
       function renderGifts() {
-        var pkg = activePackage();
-        var gifts = (pkg && pkg.gifts) || [];
-        if (gifts.length === 0) {
+        var entries = progressiveGifts();
+        giftsEl.innerHTML = "";
+        if (entries.length === 0) {
           giftsEl.hidden = true;
           return;
         }
         giftsEl.hidden = false;
-        giftsEl.textContent =
-          "Includes free " +
-          gifts
-            .map(function (g) {
-              return (g.quantity > 1 ? g.quantity + " × " : "") + g.title;
-            })
-            .join(", ");
+
+        var heading = document.createElement("p");
+        heading.className = "magyx-slot-builder__gifts-heading";
+        heading.textContent = "Free Gifts";
+        giftsEl.appendChild(heading);
+
+        var cards = document.createElement("div");
+        cards.className = "magyx-slot-builder__gift-cards";
+        giftsEl.appendChild(cards);
+
+        // A gift only actually unlocks once its tier is reached AND the
+        // active package's own slots are filled — picking the "3 Pack" tab
+        // isn't enough on its own, the shopper still has to fill it.
+        var slotsFilled = remaining() === 0;
+        var tierLockedCount = 0;
+        var nextUnlockIndex = null;
+
+        entries.forEach(function (entry) {
+          var gift = entry.gift;
+          var tierReached = entry.unlockIndex <= activePackageIndex;
+          var unlocked = tierReached && slotsFilled;
+          var lockedByTier = !tierReached;
+          if (lockedByTier) {
+            tierLockedCount += 1;
+            if (nextUnlockIndex === null || entry.unlockIndex < nextUnlockIndex) {
+              nextUnlockIndex = entry.unlockIndex;
+            }
+          }
+
+          var titleText = gift.isShipping ? "Free Shipping" : gift.title;
+
+          var card = document.createElement(unlocked ? "div" : "button");
+          if (!unlocked) card.type = "button";
+          card.className =
+            "magyx-slot-builder__gift-card" +
+            (unlocked ? "" : " magyx-slot-builder__gift-card--locked");
+          card.title = (gift.quantity > 1 ? gift.quantity + " × " : "") + titleText;
+
+          var quantity = gift.quantity || 1;
+          var value = !gift.isShipping && gift.price != null ? gift.price * quantity : null;
+          var badge = "";
+          if (value != null && value > 0) {
+            badge =
+              '<span class="magyx-slot-builder__gift-value">' +
+              escapeHtml(formatMoney(value, moneyFormat)) +
+              " VALUE</span>";
+          }
+
+          card.innerHTML =
+            badge +
+            '<div class="magyx-slot-builder__gift-body">' +
+            (gift.isShipping
+              ? '<div class="magyx-slot-builder__gift-image magyx-slot-builder__gift-image--shipping">' +
+                '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="6" width="14" height="11" rx="1"></rect><path d="M15 10h4l3 3v4h-7z"></path><circle cx="6" cy="19" r="2"></circle><circle cx="17.5" cy="19" r="2"></circle></svg>' +
+                "</div>"
+              : gift.imageUrl
+                ? '<img class="magyx-slot-builder__gift-image" loading="lazy" src="' +
+                  gift.imageUrl +
+                  '" alt="' +
+                  escapeHtml(titleText) +
+                  '">'
+                : '<div class="magyx-slot-builder__gift-image"></div>') +
+            (quantity > 1
+              ? '<span class="magyx-slot-builder__gift-qty">×' + quantity + "</span>"
+              : "") +
+            (unlocked
+              ? ""
+              : '<span class="magyx-slot-builder__gift-lock">' +
+                '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>' +
+                "LOCKED</span>") +
+            "</div>" +
+            (unlocked
+              ? '<p class="magyx-slot-builder__gift-title"' +
+                (scratchedGifts[entry.key] ? "" : " hidden") +
+                ">" +
+                escapeHtml(titleText) +
+                "</p>"
+              : "");
+
+          if (unlocked && !scratchedGifts[entry.key]) {
+            attachScratchFoil(
+              card.querySelector(".magyx-slot-builder__gift-body"),
+              entry.key,
+            );
+          }
+          if (lockedByTier) {
+            var unlockIndex = entry.unlockIndex;
+            card.addEventListener("click", function () {
+              selectPackage(unlockIndex);
+            });
+          } else if (!unlocked) {
+            // Reached this tier already, just hasn't filled its slots yet —
+            // send them straight to the picker instead of switching packs.
+            card.addEventListener("click", openModal);
+          }
+          cards.appendChild(card);
+        });
+
+        if (tierLockedCount > 0) {
+          var unlockPkg = packages[nextUnlockIndex];
+          var hint = document.createElement("p");
+          hint.className = "magyx-slot-builder__gifts-hint";
+          hint.textContent =
+            "Choose " +
+            ((unlockPkg && unlockPkg.label) || "a bigger pack") +
+            " to unlock " +
+            tierLockedCount +
+            " more free gift" +
+            (tierLockedCount === 1 ? "" : "s") +
+            "!";
+          giftsEl.appendChild(hint);
+        }
       }
 
       function renderCta() {
@@ -734,6 +993,7 @@
         renderProgress();
         renderCta();
         renderModalHeader();
+        renderGifts();
         openBtn.hidden = remaining() === 0;
         errorEl.hidden = true;
       }
@@ -875,7 +1135,6 @@
       }
 
       renderPacks();
-      renderGifts();
       update();
     }
   }

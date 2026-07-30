@@ -1720,6 +1720,7 @@ export default function BundleBuilder() {
                       onFreeShippingChange={(checked) =>
                         updateActivePackage({ freeShipping: checked })
                       }
+                      progressive
                     />
                     <Divider />
                     <ProductsSection

@@ -1100,10 +1100,170 @@
   color: var(--bc-accent);
 }
 
+/* ---- Progressive free gifts (scratch cards) ----
+   Unlocked gifts hide behind a canvas foil the shopper rubs away; locked
+   ones (from bigger packs) show blurred with a padlock and jump to the
+   unlocking package on click. All cosmetic — checkout adds unlocked gifts
+   whether or not they're scratched. */
 .magyx-slot-builder__gifts {
-  font-size: 0.9em;
+  margin: 20px 0 12px;
+}
+
+.magyx-slot-builder__gifts[hidden] {
+  display: none;
+}
+
+.magyx-slot-builder__gifts-heading {
+  font-weight: 600;
+  font-size: 1.05em;
+  margin: 12px 0 0;
+}
+
+.magyx-slot-builder__gift-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 16px 10px;
+  padding-top: 20px;
+}
+
+.magyx-slot-builder__gift-card {
+  position: relative;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+}
+
+button.magyx-slot-builder__gift-card {
+  cursor: pointer;
+}
+
+.magyx-slot-builder__gift-value {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  background: #ec3b76;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 5px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.magyx-slot-builder__gift-body {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #f4f4f4;
+}
+
+.magyx-slot-builder__gift-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.magyx-slot-builder__gift-image--shipping {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b6b6b;
+}
+
+/* Revealed by JS once the foil is scratched away — the gift's name (product
+   title, or "Free Shipping" for that virtual card). */
+.magyx-slot-builder__gift-title {
+  font-size: 0.82em;
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 6px 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.magyx-slot-builder__gift-title[hidden] {
+  display: none;
+}
+
+.magyx-slot-builder__gift-qty {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+/* The scratch-off foil — painted yellow by JS, erased by rubbing. */
+.magyx-slot-builder__gift-foil {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: pointer;
+  transition: opacity 0.4s ease;
+}
+
+.magyx-slot-builder__gift-foil--revealed {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.magyx-slot-builder__gift-card--locked .magyx-slot-builder__gift-body {
+  background: #737373;
+}
+
+.magyx-slot-builder__gift-card--locked .magyx-slot-builder__gift-image {
+  filter: blur(5px) grayscale(0.75);
+  opacity: 0.2;
+  /* keeps the blur from bleeding past the rounded corners */
+  transform: scale(1.12);
+}
+
+.magyx-slot-builder__gift-lock {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #ffffff;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  font-size: 13px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.magyx-slot-builder__gift-lock svg {
+  color: #f0f0f0;
+}
+
+.magyx-slot-builder__gifts-hint {
+  font-size: 0.85em;
   opacity: 0.75;
-  margin: 0 0 10px;
+  margin: 10px 0 0;
 }
 
 .magyx-slot-builder__error {

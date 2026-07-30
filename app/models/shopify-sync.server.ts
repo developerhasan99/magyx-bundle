@@ -58,8 +58,29 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
           }[]
         | undefined;
       if (b.type === "SLOT_BUILDER") {
+        // Gifts are progressive across packages: a package ships its own
+        // gifts plus every earlier package's (package order = position, i.e.
+        // the tab order in the editor). Merged by variantId with the highest
+        // quantity winning — a later tier can upgrade an earlier tier's gift
+        // quantity without double-shipping the same freebie. Baked here at
+        // sync time so the Cart Transform function needs no notion of
+        // package order.
+        const cumulativeGiftsByPackage: { variantId: string; quantity: number }[][] = [];
+        const giftQtyByVariant = new Map<string, number>();
+        for (const p of b.packages) {
+          for (const i of p.items) {
+            if (!i.isGift || !i.variantId) continue;
+            giftQtyByVariant.set(
+              i.variantId,
+              Math.max(giftQtyByVariant.get(i.variantId) ?? 0, i.quantity),
+            );
+          }
+          cumulativeGiftsByPackage.push(
+            Array.from(giftQtyByVariant, ([variantId, quantity]) => ({ variantId, quantity })),
+          );
+        }
         slotBuilderPackages = await Promise.all(
-          b.packages.map(async (p) => {
+          b.packages.map(async (p, index) => {
             const poolProductIds = p.items.filter((i) => !i.isGift).map((i) => i.productId);
             const slotPoolProductIds =
               poolProductIds.length > 0
@@ -70,9 +91,7 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
               freeShipping: p.freeShipping,
               slotCount: p.slotCount,
               slotPoolProductIds,
-              gifts: p.items
-                .filter((i): i is typeof i & { variantId: string } => i.isGift && Boolean(i.variantId))
-                .map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
+              gifts: cumulativeGiftsByPackage[index],
             };
           }),
         );
@@ -1590,7 +1609,11 @@ export async function publishSlotBuilderBundleProduct(
         freeShipping: pkg.freeShipping,
         tagFilters: pkg.tagFilters,
         poolSnapshot: poolSnapshotsByPackage[index],
+        // A package's OWN gifts only — the widget builds the progressive
+        // view itself (this package's gifts unlocked, later packages' gifts
+        // locked), keyed by variantId to match checkout's cumulative merge.
         gifts: pkg.giftDisplayItems.map((item) => ({
+          variantId: item.variantId,
           title: item.title,
           imageUrl: item.imageUrl,
           quantity: item.quantity,

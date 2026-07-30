@@ -13,19 +13,24 @@ import {
 import { DeleteIcon, ImageIcon, PlusIcon } from "@shopify/polaris-icons";
 import type { ItemState } from "./types";
 
-// FIXED bundles only: free gifts always included at no extra cost.
+// FIXED and SLOT_BUILDER: free gifts always included at no extra cost.
 export function GiftsSection({
   giftItems,
   setActiveItems,
   openResourcePicker,
   freeShipping,
   onFreeShippingChange,
+  progressive = false,
 }: {
   giftItems: ItemState[];
   setActiveItems: (updater: (current: ItemState[]) => ItemState[]) => void;
   openResourcePicker: (isGiftFlag: boolean) => void;
   freeShipping: boolean;
   onFreeShippingChange: (checked: boolean) => void;
+  // SLOT_BUILDER only: gifts unlock progressively across packages (this
+  // package's gifts ship with every later package too), and render on the
+  // storefront as scratch-to-reveal cards.
+  progressive?: boolean;
 }) {
   return (
     <BlockStack gap="400">
@@ -38,8 +43,9 @@ export function GiftsSection({
         </Button>
       </InlineStack>
       <Text as="p" variant="bodySm" tone="subdued">
-        Optional. These products are always included at no extra cost
-        alongside the bundle — they don&apos;t affect its price.
+        {progressive
+          ? "Optional. Gifts unlock progressively: this package's gifts also ship free with every bigger package. On the storefront they appear as scratch-to-reveal cards — gifts from bigger packages show locked, nudging customers to upgrade. Unlocked gifts are always added to the order, scratched or not."
+          : "Optional. These products are always included at no extra cost alongside the bundle — they don't affect its price."}
       </Text>
       <Checkbox
         label="Include free shipping as a gift"
