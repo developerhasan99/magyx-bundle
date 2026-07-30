@@ -1330,6 +1330,7 @@ button.magyx-slot-builder__gift-card {
   font-weight: 500;
   cursor: pointer;
   font-size: 20px;
+  margin-top: 20px;
 }
 
 .magyx-slot-builder__cta:disabled {

@@ -94,10 +94,10 @@ export function FixedAppearanceSection({
       />
       {showSkipCartOption && setSkipCart && (
         <Checkbox
-          label="Skip Cart — go directly to checkout after adding to cart"
+          label="Skip cart and go straight to checkout"
           checked={skipCart}
           onChange={setSkipCart}
-          helpText="When off, adding this bundle behaves like the theme's own Add to Cart button. When on, the bundle gets its own button that adds to cart and sends the customer straight to checkout."
+          helpText="Off (default): if this product's page has your theme's own native Add to Cart button, adding to cart uses that button, so cart drawer and quick-add behave the same as they do everywhere else on your store. If it doesn't, the widget falls back to a button of its own that adds to cart and goes straight to checkout. On: this widget always shows its own button, which adds to cart and goes straight to checkout — skipping the cart entirely, in every case."
         />
       )}
     </BlockStack>
