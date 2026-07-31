@@ -41,6 +41,9 @@ model Bundle {
   // to — ALL (every product), PRODUCTS (the explicit `items` below), or
   // COLLECTIONS (every product in `rule.collectionIds`)
   quantityBreakScope String    @default("PRODUCTS")
+  // SLOT_BUILDER only: storefront widget copy per storefront locale — see
+  // the production schema for the full shape.
+  translations    String       @default("{}")
   items           BundleItem[]
   packages        BundlePackage[]
   // QUANTITY_BREAKS only; see BundleTier below
@@ -134,6 +137,9 @@ model BundlePackage {
   // matches (case-insensitive). Display-only; an "All" chip is added
   // automatically by the widget. Empty = no filter row shown.
   tagFilters       String              @default("[]")
+  // SLOT_BUILDER only: this package's own customer-facing copy per storefront
+  // locale — see the production schema for the full shape.
+  translations     String              @default("{}")
   items            BundlePackageItem[]
 }
 

@@ -1,3 +1,16 @@
+/* Every customer-facing string in this file comes from the shared catalogue
+   in app/utils/slot-builder-text.ts rather than being written inline — the
+   same module the admin's translations editor renders its fields from, so
+   the two can't drift. `buildTranslator` there documents how a merchant's
+   per-locale overrides are resolved; here they arrive on the display
+   metafield as `settings.text`. The import is inlined at build time by
+   esbuild's --bundle (see the build:widget-js script); nothing is fetched at
+   runtime. */
+import {
+  buildPackageTextResolver,
+  buildTranslator,
+} from "../app/utils/slot-builder-text";
+
 /* Magyx Bundle builder: customer fills every slot from the merchant's
    product pool via a selection modal, then adds the bundle's own parent
    product to cart, stamping the customer's picks onto the line as
@@ -63,6 +76,7 @@
     div.textContent = text == null ? "" : String(text);
     return div.innerHTML;
   }
+
 
   // The cart-add form's hidden "id" field and Liquid's `variant.id` are plain
   // numeric ids; the metafield/proxy data carries GraphQL GIDs.
@@ -152,6 +166,28 @@
     var moneyFormat = root.dataset.moneyFormat;
     var stateEl = root.querySelector(".magyx-slot-builder__state");
     var packages = Array.isArray(data.packages) ? data.packages : [];
+
+    var settings = data.settings || {};
+    var t = buildTranslator(settings.text, settings.primaryLocale, root.dataset.locale);
+    // Count-dependent strings are `_one`/`_other` pairs rather than one
+    // string with a plural rule — the merchant writes the forms their own
+    // language needs. English splits at 1; a language that doesn't simply
+    // gets the same copy in both fields.
+    function tn(baseKey, count, vars) {
+      return t(baseKey + (count === 1 ? "_one" : "_other"), vars);
+    }
+    // Thin wrapper so call sites read `packageText.field(pkg, "label")` — the
+    // shared resolver takes the translations map and an explicit fallback,
+    // which for a package is always its own primary-locale field.
+    var resolver = buildPackageTextResolver(settings.primaryLocale, root.dataset.locale);
+    var packageText = {
+      field: function (pkg, name) {
+        return resolver.field(pkg && pkg.translations, name, (pkg && pkg[name]) || "");
+      },
+      chip: function (pkg, index, fallback) {
+        return resolver.chip(pkg && pkg.translations, index, fallback);
+      },
+    };
 
     if (
       packages.length === 0 ||
@@ -262,11 +298,13 @@
         "</div>";
       html +=
         '<p class="magyx-slot-builder__price-per-unit" data-sb="price-per-unit" hidden></p>';
-      if (data.settings && data.settings.heading) {
+      // `settings.heading` is the primary-locale copy the merchant typed in
+      // the Appearance card; per-locale versions ride along in `text` under
+      // the same reserved key every other string uses.
+      var headingText = t("heading") || settings.heading || "";
+      if (headingText) {
         html +=
-          '<p class="magyx-slot-builder__heading">' +
-          escapeHtml(data.settings.heading) +
-          "</p>";
+          '<p class="magyx-slot-builder__heading">' + escapeHtml(headingText) + "</p>";
       }
       if (packages.length > 1) {
         html +=
@@ -278,7 +316,8 @@
       html +=
         '<button type="button" class="magyx-slot-builder__add-btn" data-sb="open">' +
         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>' +
-        "Add Items</button>";
+        escapeHtml(t("addItems")) +
+        "</button>";
       html +=
         '<div class="magyx-slot-builder__gifts" data-sb="gifts" hidden></div>';
       html +=
@@ -294,7 +333,9 @@
         '<div class="magyx-slot-builder-modal" data-sb="modal" hidden>' +
         '<div class="magyx-slot-builder-modal__overlay" data-sb="overlay"></div>' +
         '<div class="magyx-slot-builder-modal__panel" role="dialog" aria-modal="true">' +
-        '<button type="button" class="magyx-slot-builder-modal__close" data-sb="close" aria-label="Close">&times;</button>' +
+        '<button type="button" class="magyx-slot-builder-modal__close" data-sb="close" aria-label="' +
+        escapeHtml(t("close")) +
+        '">&times;</button>' +
         '<div class="magyx-slot-builder-modal__header">' +
         '<p class="magyx-slot-builder-modal__title" data-sb="modal-title"></p>' +
         '<p class="magyx-slot-builder-modal__subtitle" data-sb="modal-subtitle"></p>' +
@@ -302,7 +343,9 @@
         '<div class="magyx-slot-builder-modal__filters" data-sb="filters" hidden></div>' +
         '<div class="magyx-slot-builder-modal__search-wrap">' +
         '<svg class="magyx-slot-builder-modal__search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg>' +
-        '<input type="text" class="magyx-slot-builder-modal__search" data-sb="search" placeholder="Search products…" autocomplete="off">' +
+        '<input type="text" class="magyx-slot-builder-modal__search" data-sb="search" placeholder="' +
+        escapeHtml(t("searchPlaceholder")) +
+        '" autocomplete="off">' +
         "</div>" +
         '<div class="magyx-slot-builder-modal__list" data-sb="list"></div>' +
         "</div>" +
@@ -388,7 +431,10 @@
           index += 1;
           var value =
             item.quantity > 1 ? item.quantity + " × " + item.title : item.title;
-          props.push({ key: "Item " + index, value: value });
+          // Display-only: the Cart Transform validates against
+          // `_magyx_slot_selection` below, never these numbered keys, so
+          // translating them can't affect what the customer is charged.
+          props.push({ key: t("lineItemProperty", { index: index }), value: value });
         });
         return props;
       }
@@ -437,17 +483,18 @@
             "aria-pressed",
             index === activePackageIndex ? "true" : "false",
           );
-          var badge = pkg.badgeText
+          var badgeText = packageText.field(pkg, "badgeText");
+          var badge = badgeText
             ? '<span class="magyx-slot-builder__pack-badge magyx-slot-builder__pack-badge--' +
               escapeHtml(pkg.badgeTone || "info") +
               '">' +
-              escapeHtml(pkg.badgeText) +
+              escapeHtml(badgeText) +
               "</span>"
             : "";
           tab.innerHTML =
             badge +
             '<span class="magyx-slot-builder__pack-tab-label">' +
-            escapeHtml(pkg.label) +
+            escapeHtml(packageText.field(pkg, "label")) +
             "</span>" +
             (pkg.price != null
               ? '<span class="magyx-slot-builder__pack-tab-price">' +
@@ -494,16 +541,16 @@
         priceSaveEl.hidden = !hasSavings;
         if (hasSavings) {
           priceCompareEl.textContent = formatMoney(comparePrice, moneyFormat);
-          priceSaveEl.textContent =
-            "Save " + formatMoney(comparePrice - salePrice, moneyFormat);
+          priceSaveEl.textContent = t("priceSave", {
+            amount: formatMoney(comparePrice - salePrice, moneyFormat),
+          });
         }
 
         if (slots > 0) {
           pricePerUnitEl.hidden = false;
-          pricePerUnitEl.textContent =
-            "That's only " +
-            formatMoney(salePrice / slots, moneyFormat) +
-            " per item.";
+          pricePerUnitEl.textContent = t("pricePerUnit", {
+            amount: formatMoney(salePrice / slots, moneyFormat),
+          });
         } else {
           pricePerUnitEl.hidden = true;
         }
@@ -512,11 +559,13 @@
       function renderProgress() {
         var total = totalQty();
         var left = remaining();
-        var text =
+        progressEl.textContent =
           left > 0
-            ? "Choose " + left + " more product" + (left === 1 ? "" : "s")
-            : total + " of " + (activePackage().slotCount || 0) + " selected";
-        progressEl.textContent = text;
+            ? tn("progressChoose", left, { count: left })
+            : t("progressComplete", {
+                count: total,
+                total: activePackage().slotCount || 0,
+              });
         progressEl.classList.toggle(
           "magyx-slot-builder__progress--complete",
           left === 0,
@@ -549,20 +598,20 @@
                 : "") +
               "</div>" +
               '<div class="magyx-slot-builder__pick-stepper">' +
-              '<button type="button" data-action="decrement" aria-label="Remove one ' +
-              escapeHtml(item.title) +
+              '<button type="button" data-action="decrement" aria-label="' +
+              escapeHtml(t("a11yRemoveOne", { title: item.title })) +
               '">−</button>' +
               '<span class="magyx-slot-builder__pick-qty">' +
               item.quantity +
               "</span>" +
-              '<button type="button" data-action="increment" aria-label="Add one ' +
-              escapeHtml(item.title) +
+              '<button type="button" data-action="increment" aria-label="' +
+              escapeHtml(t("a11yAddOne", { title: item.title })) +
               '"' +
               (full ? " disabled" : "") +
               ">+</button>" +
               "</div>" +
-              '<button type="button" class="magyx-slot-builder__pick-remove" aria-label="Remove ' +
-              escapeHtml(item.title) +
+              '<button type="button" class="magyx-slot-builder__pick-remove" aria-label="' +
+              escapeHtml(t("a11yRemove", { title: item.title })) +
               '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>';
             row
               .querySelector('[data-action="increment"]')
@@ -633,7 +682,12 @@
             shippingAdded = true;
             entries.push({
               key: "free-shipping",
-              gift: { title: "Free Shipping", isShipping: true, quantity: 1, price: null },
+              gift: {
+                title: t("giftFreeShipping"),
+                isShipping: true,
+                quantity: 1,
+                price: null,
+              },
               unlockIndex: pkgIndex,
             });
           }
@@ -669,7 +723,7 @@
           ctx.fillText("🎁", w / 2, h * 0.38);
           ctx.fillStyle = "#1a1a1a";
           ctx.font = "800 " + Math.max(12, Math.round(w * 0.13)) + "px sans-serif";
-          ctx.fillText("SCRATCH", w / 2, h * 0.76);
+          ctx.fillText(t("giftScratch"), w / 2, h * 0.76);
         }
         // Deferred a frame: the card isn't laid out (zero-sized) until it's
         // actually in the document.
@@ -759,7 +813,7 @@
 
         var heading = document.createElement("p");
         heading.className = "magyx-slot-builder__gifts-heading";
-        heading.textContent = "Free Gifts";
+        heading.textContent = t("giftsHeading");
         giftsEl.appendChild(heading);
 
         var cards = document.createElement("div");
@@ -777,10 +831,14 @@
           var unlocked = tierReached && slotsFilled;
           var lockedByTier = !tierReached;
 
-          var titleText = gift.isShipping ? "Free Shipping" : gift.title;
+          var titleText = gift.isShipping ? t("giftFreeShipping") : gift.title;
           var unlockPkg = packages[entry.unlockIndex];
-          var lockLabel =
-            unlockPkg && unlockPkg.label ? unlockPkg.label + " Exclusive" : "Locked";
+          var unlockPkgLabel = unlockPkg
+            ? packageText.field(unlockPkg, "label")
+            : "";
+          var lockLabel = unlockPkgLabel
+            ? t("giftExclusive", { pack: unlockPkgLabel })
+            : t("giftLocked");
 
           var card = document.createElement(unlocked ? "div" : "button");
           if (!unlocked) card.type = "button";
@@ -796,8 +854,8 @@
           if (value != null && value > 0) {
             badge =
               '<span class="magyx-slot-builder__gift-value">' +
-              escapeHtml(formatMoney(value, moneyFormat)) +
-              " VALUE</span>";
+              escapeHtml(t("giftValue", { amount: formatMoney(value, moneyFormat) })) +
+              "</span>";
           }
 
           card.innerHTML =
@@ -826,7 +884,8 @@
                   "</span>"
                 : '<span class="magyx-slot-builder__gift-lock">' +
                   '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>' +
-                  "LOCKED</span>") +
+                  escapeHtml(t("giftLocked")) +
+                  "</span>") +
             "</div>" +
             (unlocked
               ? '<p class="magyx-slot-builder__gift-title"' +
@@ -861,11 +920,10 @@
       function ctaLabel() {
         var pkg = activePackage();
         var left = remaining();
-        if (left > 0) return "Choose " + left + " more";
-        return (
-          "Add to cart" +
-          (pkg && pkg.price != null ? " — " + formatMoney(pkg.price, moneyFormat) : "")
-        );
+        if (left > 0) return tn("ctaChoose", left, { count: left });
+        return pkg && pkg.price != null
+          ? t("ctaAddPriced", { price: formatMoney(pkg.price, moneyFormat) })
+          : t("ctaAdd");
       }
 
       function renderCta() {
@@ -900,7 +958,21 @@
           return;
         }
         filtersEl.hidden = false;
-        [{ label: "All", tag: null }].concat(filters).forEach(function (filter) {
+        // The automatic "All" chip is index -1 in the merchant's own chip
+        // list, so its label comes from the shared catalogue while every
+        // other chip resolves against the package's positional overrides.
+        var chips = [{ label: t("filterAll"), tag: null, index: -1 }].concat(
+          filters.map(function (filter, index) {
+            // Chip labels are translated positionally against this list; the
+            // `tag` a chip matches is never translated, only its button text.
+            return {
+              label: packageText.chip(pkg, index, filter.label),
+              tag: filter.tag,
+              index: index,
+            };
+          }),
+        );
+        chips.forEach(function (filter) {
           var tag = filter.tag == null ? null : String(filter.tag).toLowerCase();
           var chip = document.createElement("button");
           chip.type = "button";
@@ -926,8 +998,7 @@
         if (poolItems.length === 0) {
           var empty = document.createElement("p");
           empty.className = "magyx-slot-builder__empty";
-          empty.textContent =
-            "No products available for this option right now.";
+          empty.textContent = t("emptyPool");
           listEl.appendChild(empty);
           return;
         }
@@ -948,9 +1019,7 @@
         if (visibleItems.length === 0) {
           var noMatch = document.createElement("p");
           noMatch.className = "magyx-slot-builder__empty";
-          noMatch.textContent = searchText
-            ? "No products match your search."
-            : "No products match this filter.";
+          noMatch.textContent = searchText ? t("emptySearch") : t("emptyFilter");
           listEl.appendChild(noMatch);
           return;
         }
@@ -985,13 +1054,17 @@
               : "") +
             "</div>" +
             '<div class="magyx-slot-builder-modal__stepper">' +
-            '<button type="button" data-action="decrement" aria-label="Remove one"' +
+            '<button type="button" data-action="decrement" aria-label="' +
+            escapeHtml(t("a11yRemoveOne", { title: item.title })) +
+            '"' +
             (qty === 0 ? " disabled" : "") +
             ">−</button>" +
             '<span class="magyx-slot-builder-modal__qty">' +
             qty +
             "</span>" +
-            '<button type="button" data-action="increment" aria-label="Add one"' +
+            '<button type="button" data-action="increment" aria-label="' +
+            escapeHtml(t("a11yAddOne", { title: item.title })) +
+            '"' +
             (!item.available || (full && qty === 0) ? " disabled" : "") +
             ">+</button>" +
             "</div>";
@@ -1046,10 +1119,9 @@
         var slots = activePackage().slotCount || 0;
         modalTitleEl.textContent =
           left === 0
-            ? "Your bundle is ready!"
-            : "Add " + left + " more product" + (left === 1 ? "" : "s");
-        modalSubtitleEl.textContent =
-          "Build your " + slots + "-product bundle.";
+            ? t("modalTitleReady")
+            : tn("modalTitle", left, { count: left });
+        modalSubtitleEl.textContent = t("modalSubtitle", { count: slots });
       }
 
       function update() {
@@ -1097,12 +1169,7 @@
       function showIncompleteError() {
         var left = remaining();
         errorEl.hidden = false;
-        errorEl.textContent =
-          "Choose " +
-          left +
-          " more product" +
-          (left === 1 ? "" : "s") +
-          " before adding to cart.";
+        errorEl.textContent = tn("errorIncomplete", left, { count: left });
         openModal();
       }
 
@@ -1178,7 +1245,7 @@
           var pkg = activePackage();
           var originalLabel = ctaBtn.textContent;
           ctaBtn.disabled = true;
-          ctaBtn.textContent = "Adding…";
+          ctaBtn.textContent = t("ctaAdding");
           fetch("/cart/add.js", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1199,7 +1266,7 @@
             .catch(function () {
               ctaBtn.disabled = false;
               ctaBtn.textContent = originalLabel;
-              alert("Sorry, we couldn't add this to your cart. Please try again.");
+              alert(t("errorAddFailed"));
             });
         });
       }

@@ -1,4 +1,8 @@
 import prisma from "../db.server";
+import type {
+  PackageTranslations,
+  SlotBuilderTranslations,
+} from "../utils/slot-builder-text";
 
 export type BundleType = "FIXED" | "SLOT_BUILDER" | "MIX_MATCH" | "QUANTITY_BREAKS";
 export type BundleStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
@@ -77,6 +81,9 @@ export interface PackageInput {
   // Storefront pool-modal filter chips: `label` is the button text customers
   // see, `tag` the exact product tag it matches. Display-only.
   tagFilters: { label: string; tag: string }[];
+  // SLOT_BUILDER only: this package's label/badge/chip copy per storefront
+  // locale. The fields above stay the primary-locale copy and the fallback.
+  translations: PackageTranslations;
   items: BundleItemInput[];
 }
 
@@ -100,6 +107,10 @@ export interface BundleInput {
   freeShipping: boolean;
   // QUANTITY_BREAKS only: ALL | PRODUCTS | COLLECTIONS
   quantityBreakScope: string;
+  // SLOT_BUILDER only: storefront widget copy per locale, keyed by the string
+  // keys in app/utils/slot-builder-text.ts (plus the reserved "heading" key,
+  // whose primary-locale copy is `widgetHeading` above).
+  translations: SlotBuilderTranslations;
   items: BundleItemInput[];
   // FIXED bundles only; empty for MIX_MATCH/SLOT_BUILDER/QUANTITY_BREAKS
   packages: PackageInput[];
@@ -193,6 +204,7 @@ function packagesCreateData(packages: PackageInput[]) {
     collectionIds: JSON.stringify(pkg.collectionIds),
     variantFilter: pkg.variantFilter,
     tagFilters: JSON.stringify(pkg.tagFilters),
+    translations: JSON.stringify(pkg.translations ?? {}),
     items: { create: pkg.items },
   }));
 }
@@ -216,6 +228,7 @@ export async function createBundle(shop: string, input: BundleInput) {
       showSubtextOnGifts: input.showSubtextOnGifts,
       freeShipping: input.freeShipping,
       quantityBreakScope: input.quantityBreakScope,
+      translations: JSON.stringify(input.translations ?? {}),
       items: { create: input.items },
       packages: { create: packagesCreateData(input.packages) },
       tiers: { create: tiersCreateData(input.tiers) },
@@ -275,6 +288,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         collectionIds: JSON.stringify(pkg.collectionIds),
         variantFilter: pkg.variantFilter,
         tagFilters: JSON.stringify(pkg.tagFilters),
+        translations: JSON.stringify(pkg.translations ?? {}),
       };
       if (pkg.id && existingPackageIds.has(pkg.id)) {
         await tx.bundlePackageItem.deleteMany({ where: { packageId: pkg.id } });
@@ -307,6 +321,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         showSubtextOnGifts: input.showSubtextOnGifts,
         freeShipping: input.freeShipping,
         quantityBreakScope: input.quantityBreakScope,
+        translations: JSON.stringify(input.translations ?? {}),
         items: { create: input.items },
         tiers: { create: tiersCreateData(input.tiers) },
         rule: input.rule

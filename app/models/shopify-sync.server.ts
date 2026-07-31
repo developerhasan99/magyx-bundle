@@ -1,5 +1,9 @@
 import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 import { getBundles, setBundleProduct, setPackageVariant } from "./bundle.server";
+import type {
+  PackageTranslations,
+  SlotBuilderTranslations,
+} from "../utils/slot-builder-text";
 
 const CONFIG_NAMESPACE = "$app:magyx-bundle";
 const CONFIG_KEY = "config";
@@ -1412,6 +1416,9 @@ interface SlotBuilderPackageInput {
   // each one matches. Display-only: baked into the display metafield for the
   // widget, never enforced at checkout.
   tagFilters: { label: string; tag: string }[];
+  // This package's label/badge/chip copy per storefront locale. The fields
+  // above stay the primary-locale copy the widget falls back to.
+  translations: PackageTranslations;
   gifts: { variantId: string; quantity: number }[];
   // Denormalized gift info for the storefront widget's gift display
   giftDisplayItems: {
@@ -1436,6 +1443,96 @@ interface SlotBuilderPublishInput {
     itemSubtextTemplate: string;
     showSubtextOnGifts: boolean;
   };
+  // Widget copy the merchant translated, by locale then string key (see
+  // app/utils/slot-builder-text.ts). The reserved "heading" key holds
+  // per-locale versions of `widgetSettings.heading`.
+  translations: SlotBuilderTranslations;
+  // The shop's primary storefront locale — the widget falls back to this
+  // bucket before falling back to its own built-in English defaults, so a
+  // merchant whose default copy is German gets German on unlisted markets.
+  primaryLocale: string;
+}
+
+export interface ShopLocale {
+  /** IETF tag as Shopify reports it, e.g. "en", "fr", "pt-BR". */
+  locale: string;
+  name: string;
+  primary: boolean;
+}
+
+/**
+ * The shop's published storefront languages, primary first. Drives the
+ * language switcher in the bundle editor's translations card, and tells the
+ * storefront widget which bucket to fall back to. Unpublished locales are
+ * dropped: a merchant can't show them to shoppers yet, so offering fields
+ * for them is just clutter.
+ *
+ * Soft-fails to a single "en" primary — a locale lookup hiccup should cost
+ * the merchant the translation UI, not the whole bundle editor.
+ */
+export async function fetchShopLocales(admin: AdminApiContext): Promise<ShopLocale[]> {
+  try {
+    const response = await admin.graphql(
+      `#graphql
+      query magyxShopLocales {
+        shopLocales(published: true) { locale name primary }
+      }`,
+    );
+    const locales = (await response.json()).data?.shopLocales ?? [];
+    if (locales.length === 0) return [{ locale: "en", name: "English", primary: true }];
+    return [...locales].sort(
+      (a: ShopLocale, b: ShopLocale) => Number(b.primary) - Number(a.primary),
+    );
+  } catch (error) {
+    console.warn("Magyx Bundle: could not load shop locales", error);
+    return [{ locale: "en", name: "English", primary: true }];
+  }
+}
+
+/* Translations go into a metafield that also carries a (capped, but not
+   small) pool snapshot and ships on every product page render, so only keys
+   the merchant actually filled in are baked. Blanks are dropped rather than
+   written as empty strings: at read time the widget treats a missing key as
+   "fall back to the primary locale, then to my built-in default", which is
+   what an untouched field is meant to do. A locale left entirely blank
+   disappears with it. */
+function pruneTranslations(
+  translations: SlotBuilderTranslations | undefined,
+): SlotBuilderTranslations {
+  const pruned: SlotBuilderTranslations = {};
+  for (const [locale, strings] of Object.entries(translations ?? {})) {
+    const kept: Record<string, string> = {};
+    for (const [key, value] of Object.entries(strings ?? {})) {
+      const trimmed = typeof value === "string" ? value.trim() : "";
+      if (trimmed) kept[key] = trimmed;
+    }
+    if (Object.keys(kept).length > 0) pruned[locale] = kept;
+  }
+  return pruned;
+}
+
+function prunePackageTranslations(
+  translations: PackageTranslations | undefined,
+): PackageTranslations {
+  const pruned: PackageTranslations = {};
+  for (const [locale, entry] of Object.entries(translations ?? {})) {
+    const label = entry?.label?.trim() || "";
+    const badgeText = entry?.badgeText?.trim() || "";
+    // Kept as a positional array against the package's own `tagFilters`, so
+    // an untranslated chip in the middle has to survive as "" rather than
+    // collapsing and shifting every later chip onto the wrong filter.
+    const tagFilterLabels = (entry?.tagFilterLabels ?? []).map((value) =>
+      typeof value === "string" ? value.trim() : "",
+    );
+    const hasChipLabels = tagFilterLabels.some(Boolean);
+    if (!label && !badgeText && !hasChipLabels) continue;
+    pruned[locale] = {
+      ...(label ? { label } : {}),
+      ...(badgeText ? { badgeText } : {}),
+      ...(hasChipLabels ? { tagFilterLabels } : {}),
+    };
+  }
+  return pruned;
 }
 
 /**
@@ -1680,12 +1777,22 @@ export async function publishSlotBuilderBundleProduct(
 
     const displayValue = {
       bundleId: input.bundleId,
-      settings: input.widgetSettings,
+      settings: {
+        ...input.widgetSettings,
+        // Storefront copy the merchant translated. `heading` lives inside
+        // `text` per locale rather than beside `settings.heading` so the
+        // widget resolves it through the same lookup as every other string.
+        primaryLocale: input.primaryLocale,
+        text: pruneTranslations(input.translations),
+      },
       packages: input.packages.map((pkg, index) => ({
         variantId: variantIdByPackageId.get(pkg.packageId)!,
         label: pkg.label,
         badgeText: pkg.badgeText ?? null,
         badgeTone: pkg.badgeTone ?? null,
+        // Per-locale overrides for this package's own copy — the widget
+        // falls back to the three fields above when a locale has no entry.
+        translations: prunePackageTranslations(pkg.translations),
         price: pkg.pricingValue,
         slotCount: pkg.slotCount,
         freeShipping: pkg.freeShipping,

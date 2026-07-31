@@ -31,11 +31,17 @@ import {
 } from "../../models/bundle.server";
 import {
   fetchProductPoolItems,
+  fetchShopLocales,
   publishFixedBundleProduct,
   publishSlotBuilderBundleProduct,
   resolveCollectionProductIds,
   syncBundleConfigMetafield,
 } from "../../models/shopify-sync.server";
+import {
+  parseTranslations,
+  type PackageTranslations,
+  type SlotBuilderTranslations,
+} from "../../utils/slot-builder-text";
 import {
   defaultPackageState,
   defaultQbTiers,
@@ -55,6 +61,7 @@ import { QuantityBreaksTiersSection } from "./QuantityBreaksTiersSection";
 import { QuantityBreaksWidgetSection } from "./QuantityBreaksWidgetSection";
 import { MixMatchRulesSection } from "./MixMatchRulesSection";
 import { AppearanceSection } from "./AppearanceSection";
+import { TranslationsSection } from "./TranslationsSection";
 import { PreviewSidebar } from "./PreviewSidebar";
 
 const CREATABLE_BUNDLE_TYPES = ["FIXED", "SLOT_BUILDER", "MIX_MATCH", "QUANTITY_BREAKS"];
@@ -78,6 +85,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     console.warn("Magyx Bundle: could not load shop currency", error);
   }
 
+  // Drives the Translations card's language switcher. Fetched for every
+  // bundle type (it's one cheap query and the editor can switch type
+  // in-session) and soft-fails to a lone "en" primary inside the helper.
+  const shopLocales = await fetchShopLocales(admin);
+
   if (params.id === "new") {
     // Set by the /app/bundles/create type picker so this editor opens with
     // the chosen type pre-selected instead of always defaulting to FIXED.
@@ -86,6 +98,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       bundle: null,
       shopifyProduct: null,
       shopCurrency,
+      shopLocales,
       requestedType: CREATABLE_BUNDLE_TYPES.includes(requestedType ?? "")
         ? (requestedType as "FIXED" | "SLOT_BUILDER" | "MIX_MATCH" | "QUANTITY_BREAKS")
         : null,
@@ -269,6 +282,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   return {
     shopifyProduct,
     shopCurrency,
+    shopLocales,
     requestedType: null,
     bundle: {
       id: bundle.id,
@@ -288,6 +302,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       showSubtextOnGifts: bundle.showSubtextOnGifts,
       freeShipping: bundle.freeShipping,
       quantityBreakScope: bundle.quantityBreakScope,
+      translations: parseTranslations<SlotBuilderTranslations>(bundle.translations, {}),
       items: bundle.items.map((i) => ({
         productId: i.productId,
         variantId: i.variantId,
@@ -315,6 +330,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         collectionPoolItems: [] as ResolvedPoolItem[],
         variantFilter: p.variantFilter,
         tagFilters: JSON.parse(p.tagFilters) as TagFilterState[],
+        translations: parseTranslations<PackageTranslations>(p.translations, {}),
         items: p.items.map((i) => ({
           productId: i.productId,
           variantId: i.variantId,
@@ -524,12 +540,22 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   // snapshot (the customer's slot picks aren't known until checkout).
   if (bundle.type === "SLOT_BUILDER" && bundle.status === "ACTIVE") {
     try {
+      // The widget falls back to this locale's copy before falling back to
+      // its own built-in English, so a shop whose default copy isn't English
+      // stays in its own language on markets it hasn't translated for.
+      const primaryLocale =
+        (await fetchShopLocales(admin)).find((l) => l.primary)?.locale ?? "en";
       await publishSlotBuilderBundleProduct(
         admin,
         {
           bundleId: bundle.id,
           title: bundle.title,
           description: bundle.description,
+          primaryLocale,
+          translations: parseTranslations<SlotBuilderTranslations>(
+            bundle.translations,
+            {},
+          ),
           widgetSettings: {
             heading: bundle.widgetHeading,
             accentColor: bundle.accentColor,
@@ -554,6 +580,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             collectionIds: JSON.parse(pkg.collectionIds) as string[],
             variantFilter: pkg.variantFilter,
             tagFilters: JSON.parse(pkg.tagFilters) as { label: string; tag: string }[],
+            translations: parseTranslations<PackageTranslations>(pkg.translations, {}),
             gifts: pkg.items
               .filter((i) => i.isGift && i.variantId)
               .map((i) => ({ variantId: i.variantId!, quantity: i.quantity })),
@@ -612,6 +639,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
     itemSubtextTemplate: bundle?.itemSubtextTemplate ?? "",
     showSubtextOnGifts: bundle?.showSubtextOnGifts ?? true,
     freeShipping: bundle?.freeShipping ?? false,
+    translations: (bundle?.translations ?? {}) as SlotBuilderTranslations,
     items:
       bundle?.items.map((i): ItemState => ({
         productId: i.productId,
@@ -641,6 +669,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
               variantFilter: p.variantFilter ?? "",
               tagFilters: (p.tagFilters ?? []) as TagFilterState[],
               slotCount: String(p.slotCount ?? 2),
+              translations: (p.translations ?? {}) as PackageTranslations,
               items: p.items.map(
                 (i): ItemState => ({
                   productId: i.productId,
@@ -708,7 +737,8 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
 }
 
 export default function BundleBuilder() {
-  const { bundle, shopifyProduct, shopCurrency, requestedType } = useLoaderData<typeof loader>();
+  const { bundle, shopifyProduct, shopCurrency, shopLocales, requestedType } =
+    useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const deleteFetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
@@ -748,6 +778,9 @@ export default function BundleBuilder() {
     initialForm.showSubtextOnGifts,
   );
   const [freeShipping, setFreeShipping] = useState(initialForm.freeShipping);
+  const [translations, setTranslations] = useState<SlotBuilderTranslations>(
+    initialForm.translations,
+  );
   const [items, setItems] = useState<ItemState[]>(initialForm.items);
   const [packages, setPackages] = useState<PackageState[]>(initialForm.packages);
   const [activePackageIndex, setActivePackageIndex] = useState(0);
@@ -820,13 +853,15 @@ export default function BundleBuilder() {
     [type, activePackageIndex],
   );
 
+  const updatePackageAt = useCallback((index: number, patch: Partial<PackageState>) => {
+    setPackages((current) =>
+      current.map((pkg, i) => (i === index ? { ...pkg, ...patch } : pkg)),
+    );
+  }, []);
+
   const updateActivePackage = useCallback(
-    (patch: Partial<PackageState>) => {
-      setPackages((current) =>
-        current.map((pkg, i) => (i === activePackageIndex ? { ...pkg, ...patch } : pkg)),
-      );
-    },
-    [activePackageIndex],
+    (patch: Partial<PackageState>) => updatePackageAt(activePackageIndex, patch),
+    [updatePackageAt, activePackageIndex],
   );
 
   // SLOT_BUILDER only: each package has its own product pool + slot count
@@ -971,7 +1006,7 @@ export default function BundleBuilder() {
       JSON.stringify({
         title, type, status, pricingType, pricingValue, widgetStyle,
         widgetHeading, accentColor, showPrices, skipCart, itemSubtextTemplate,
-        showSubtextOnGifts, freeShipping, items,
+        showSubtextOnGifts, freeShipping, translations, items,
         packages: stripCollectionPoolItems(packages),
         collections, collectionPoolItems, poolSource,
         minItems, maxItems, tiers, qbTiers,
@@ -983,7 +1018,7 @@ export default function BundleBuilder() {
     [
       initialForm, title, type, status, pricingType, pricingValue,
       widgetStyle, widgetHeading, accentColor, showPrices, skipCart, itemSubtextTemplate,
-      showSubtextOnGifts, freeShipping, items, packages, collections,
+      showSubtextOnGifts, freeShipping, translations, items, packages, collections,
       collectionPoolItems, poolSource,
       minItems, maxItems, tiers, qbTiers,
     ],
@@ -1010,6 +1045,7 @@ export default function BundleBuilder() {
       setItemSubtextTemplate(form.itemSubtextTemplate);
       setShowSubtextOnGifts(form.showSubtextOnGifts);
       setFreeShipping(form.freeShipping);
+      setTranslations(form.translations);
       setItems(form.items);
       setPackages(form.packages);
       if (resetActiveTabs) setActivePackageIndex(0);
@@ -1374,6 +1410,9 @@ export default function BundleBuilder() {
       showSubtextOnGifts,
       freeShipping,
       quantityBreakScope: poolSource,
+      // Only Build a Box renders a translatable widget — every other type
+      // would just be carrying dead copy around.
+      translations: type === "SLOT_BUILDER" ? translations : {},
       // price/missing are editor-only display state — the DB schema doesn't store them
       items:
         type === "FIXED" || type === "SLOT_BUILDER" || usesCollections || usesAllProducts
@@ -1429,6 +1468,7 @@ export default function BundleBuilder() {
                         .map((f) => ({ label: f.label.trim(), tag: f.tag.trim() }))
                         .filter((f) => f.label && f.tag)
                     : [],
+                translations: type === "SLOT_BUILDER" ? (pkg.translations ?? {}) : {},
                 // Pool items (isGift: false) aren't sent when this package's
                 // pool is collection-sourced — only its free gifts are.
                 items: (pkgUsesCollections ? pkg.items.filter((i) => i.isGift) : pkg.items).map(
@@ -1463,8 +1503,8 @@ export default function BundleBuilder() {
   }, [
     fetcher, title, description, type, status, pricingType, pricingValue,
     widgetStyle, widgetHeading, accentColor, showPrices, skipCart, itemSubtextTemplate,
-    showSubtextOnGifts, freeShipping, items, packages, minItems, maxItems, tiers, poolSource,
-    collections, qbTiers,
+    showSubtextOnGifts, freeShipping, translations, items, packages, minItems, maxItems,
+    tiers, poolSource, collections, qbTiers,
   ]);
 
   // Mirrors the compare-at math in publishFixedBundleProduct/
@@ -1889,6 +1929,22 @@ export default function BundleBuilder() {
                     setShowSubtextOnGifts={setShowSubtextOnGifts}
                     skipCart={skipCart}
                     setSkipCart={setSkipCart}
+                  />
+                </Card>
+              )}
+
+              {/* Build a box is the only type with a translatable storefront
+                  widget — the others render merchant copy the theme already
+                  gets through Shopify's own translation tools. */}
+              {type === "SLOT_BUILDER" && (
+                <Card>
+                  <TranslationsSection
+                    locales={shopLocales}
+                    translations={translations}
+                    setTranslations={setTranslations}
+                    widgetHeading={widgetHeading}
+                    packages={packages}
+                    updatePackage={updatePackageAt}
                   />
                 </Card>
               )}

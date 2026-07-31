@@ -68,6 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     showSubtextOnGifts: true,
     freeShipping: false,
     quantityBreakScope: "PRODUCTS",
+    translations: {},
     items: [],
     packages: [],
     tiers: [],

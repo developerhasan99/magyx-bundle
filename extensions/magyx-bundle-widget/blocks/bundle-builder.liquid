@@ -19,6 +19,7 @@
     class="magyx-slot-builder"
     style="--bc-accent: {{ bundle_data.settings.accentColor | default: '#1a1a1a' }};"
     data-money-format="{{ shop.money_format | escape }}"
+    data-locale="{{ request.locale.iso_code | escape }}"
     data-impl-src="{{ 'magyx-bundle-slot-builder-impl.js' | asset_url }}"
     {{ block.shopify_attributes }}
   >

@@ -1,3 +1,5 @@
+import type { PackageTranslations } from "../../utils/slot-builder-text";
+
 export interface ItemState {
   productId: string;
   variantId: string | null;
@@ -125,6 +127,9 @@ export interface PackageState {
   // Storefront pool-modal filter chips — see TagFilterState.
   tagFilters: TagFilterState[];
   slotCount: string;
+  // SLOT_BUILDER only: this package's label/badge/chip copy per storefront
+  // locale. The fields above stay the primary-locale copy and the fallback.
+  translations: PackageTranslations;
 }
 
 export function defaultPackageState(): PackageState {
@@ -143,6 +148,7 @@ export function defaultPackageState(): PackageState {
     variantFilter: "",
     tagFilters: [],
     slotCount: "2",
+    translations: {},
   };
 }
 

@@ -43,6 +43,14 @@ model Bundle {
   // to — ALL (every product), PRODUCTS (the explicit `items` below), or
   // COLLECTIONS (every product in `rule.collectionIds`)
   quantityBreakScope String    @default("PRODUCTS")
+  // SLOT_BUILDER only: storefront widget copy per storefront locale —
+  // JSON { "fr": { "addItems": "Ajouter", ... }, ... } keyed by the string
+  // keys in app/utils/slot-builder-text.ts. Only keys the merchant actually
+  // filled in are stored; anything missing falls back to the shop's primary
+  // locale and then to the widget's built-in English default. `widgetHeading`
+  // above stays the primary-locale copy; its per-locale versions live here
+  // under the reserved "heading" key.
+  translations    String       @default("{}")
   items           BundleItem[]
   packages        BundlePackage[]
   // QUANTITY_BREAKS only; see BundleTier below
@@ -136,6 +144,14 @@ model BundlePackage {
   // matches (case-insensitive). Display-only; an "All" chip is added
   // automatically by the widget. Empty = no filter row shown.
   tagFilters       String              @default("[]")
+  // SLOT_BUILDER only: this package's own customer-facing copy per
+  // storefront locale — JSON { "fr": { label, badgeText, tagFilterLabels } }.
+  // Lives on the package (not the bundle) so it rides the same upsert-by-id
+  // path the rest of this row does: reordering or deleting a package can't
+  // strand its translations on the wrong one. `tagFilterLabels` is positional
+  // against `tagFilters` above — the `tag` a chip matches is never translated,
+  // only the button text. Blank/missing falls back to the fields above.
+  translations     String              @default("{}")
   items            BundlePackageItem[]
 }
 
