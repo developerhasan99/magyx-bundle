@@ -28,7 +28,10 @@
    own language actually uses sidesteps CLDR entirely, and is what every
    comparable Shopify app does. The widget picks `_one` at exactly 1. */
 export const SLOT_BUILDER_TEXT_DEFAULTS = {
-  addItems: "Add Items",
+  slotEmptyTitle: "Choose a product",
+  slotEmptyHint: "Tap to browse the collection",
+  slotEmptyAction: "CHOOSE",
+
   ctaChoose_one: "Choose {count} more",
   ctaChoose_other: "Choose {count} more",
   ctaAdd: "Add to cart",
@@ -54,7 +57,6 @@ export const SLOT_BUILDER_TEXT_DEFAULTS = {
   giftsHeading: "Free Gifts",
   giftFreeShipping: "Free Shipping",
   giftValue: "{amount} VALUE",
-  giftScratch: "SCRATCH",
   giftLocked: "LOCKED",
   giftExclusive: "{pack} Exclusive",
 
@@ -103,11 +105,19 @@ export const SLOT_BUILDER_TEXT_PLACEHOLDERS = [
 /** Admin-editor metadata, in render order. Tree-shaken out of the widget. */
 export const SLOT_BUILDER_TEXT_FIELDS: SlotBuilderTextField[] = [
   {
-    key: "addItems",
-    group: "Buttons",
-    label: "Add items button",
-    help: "Opens the product selection panel. Hidden once every slot is filled.",
+    key: "slotEmptyTitle",
+    group: "Empty slots",
+    label: "Empty slot title",
+    help: "Each unfilled slot renders as a numbered row that opens the product picker.",
   },
+  { key: "slotEmptyHint", group: "Empty slots", label: "Empty slot hint" },
+  {
+    key: "slotEmptyAction",
+    group: "Empty slots",
+    label: "Empty slot action",
+    help: "The call-to-action at the right of the row. Keep it short.",
+  },
+
   {
     key: "ctaChoose_one",
     group: "Buttons",
@@ -164,22 +174,16 @@ export const SLOT_BUILDER_TEXT_FIELDS: SlotBuilderTextField[] = [
   },
   { key: "giftValue", group: "Free gifts", label: "Gift value badge" },
   {
-    key: "giftScratch",
-    group: "Free gifts",
-    label: "Scratch-off label",
-    help: "Painted onto the foil covering an unlocked gift. Keep it short — it has to fit the card.",
-  },
-  {
-    key: "giftLocked",
-    group: "Free gifts",
-    label: "Locked gift",
-    help: "Shown on this package's own gifts until every slot is filled.",
-  },
-  {
     key: "giftExclusive",
     group: "Free gifts",
     label: "Gift locked to a bigger package",
     help: "{pack} is the label of the package that unlocks the gift.",
+  },
+  {
+    key: "giftLocked",
+    group: "Free gifts",
+    label: "Locked gift — fallback",
+    help: "Used in place of the above when the unlocking package has no label.",
   },
 
   { key: "errorIncomplete_one", group: "Errors", label: "Incomplete box — 1 slot left" },

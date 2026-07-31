@@ -92,42 +92,6 @@ import {
     return document.querySelector('form[action*="/cart/add"]');
   }
 
-  var CONFETTI_COLORS = ["#ec3b76", "#f7d63d", "#4ade80", "#60a5fa", "#c084fc"];
-
-  // A small burst of colored squares flung outward from the center of
-  // `container` — the "mild surprise" moment right after a gift card is
-  // fully scratched. Self-removing; skipped entirely for shoppers who've
-  // asked their OS for reduced motion.
-  function burstConfetti(container) {
-    if (
-      window.matchMedia &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
-      return;
-    }
-    var wrap = document.createElement("div");
-    wrap.className = "magyx-slot-builder__confetti";
-    var pieceCount = 14;
-    for (var i = 0; i < pieceCount; i++) {
-      var piece = document.createElement("span");
-      piece.className = "magyx-slot-builder__confetti-piece";
-      var angle = Math.random() * Math.PI * 2;
-      var distance = 38 + Math.random() * 46;
-      piece.style.setProperty("--dx", (Math.cos(angle) * distance).toFixed(1) + "px");
-      // Biased upward (negative y) so the burst reads as "popping up", not
-      // just scattering flat.
-      piece.style.setProperty("--dy", (Math.sin(angle) * distance - 22).toFixed(1) + "px");
-      piece.style.setProperty("--rot", Math.round((Math.random() - 0.5) * 480) + "deg");
-      piece.style.background = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
-      piece.style.animationDelay = Math.round(Math.random() * 60) + "ms";
-      wrap.appendChild(piece);
-    }
-    container.appendChild(wrap);
-    setTimeout(function () {
-      wrap.remove();
-    }, 900);
-  }
-
   function readData(root) {
     var script = root.querySelector("[data-magyx-slot-builder-data]");
     if (!script) return null;
@@ -312,12 +276,9 @@ import {
       }
       html +=
         '<div class="magyx-slot-builder__progress" data-sb="progress"></div>';
-      html += '<div class="magyx-slot-builder__picks" data-sb="picks"></div>';
-      html +=
-        '<button type="button" class="magyx-slot-builder__add-btn" data-sb="open">' +
-        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>' +
-        escapeHtml(t("addItems")) +
-        "</button>";
+      // One row per slot, filled or empty — the empty rows are themselves the
+      // way into the picker, so there's no separate "Add items" button.
+      html += '<div class="magyx-slot-builder__slots" data-sb="slots"></div>';
       html +=
         '<div class="magyx-slot-builder__gifts" data-sb="gifts" hidden></div>';
       html +=
@@ -359,7 +320,7 @@ import {
       var priceSaveEl = stateEl.querySelector('[data-sb="price-save"]');
       var pricePerUnitEl = stateEl.querySelector('[data-sb="price-per-unit"]');
       var progressEl = stateEl.querySelector('[data-sb="progress"]');
-      var picksEl = stateEl.querySelector('[data-sb="picks"]');
+      var slotsEl = stateEl.querySelector('[data-sb="slots"]');
       var giftsEl = stateEl.querySelector('[data-sb="gifts"]');
       var errorEl = stateEl.querySelector('[data-sb="error"]');
       var modalEl = stateEl.querySelector('[data-sb="modal"]');
@@ -368,7 +329,6 @@ import {
       var filtersEl = stateEl.querySelector('[data-sb="filters"]');
       var searchInputEl = stateEl.querySelector('[data-sb="search"]');
       var listEl = stateEl.querySelector('[data-sb="list"]');
-      var openBtn = stateEl.querySelector('[data-sb="open"]');
       var ctaBtn = stateEl.querySelector('[data-sb="cta"]');
       var searchText = "";
       // Tag the shopper is filtering the pool by (chips defined per package
@@ -449,6 +409,10 @@ import {
         activePackageIndex = index;
         selections.clear();
         renderPacks();
+        // Gift cards depend only on which package is active, so they're
+        // rerendered here alongside the tabs rather than in update() — no
+        // need to rebuild them on every stepper click.
+        renderGifts();
         update();
         syncActiveVariant();
       }
@@ -572,101 +536,130 @@ import {
         );
       }
 
-      function renderPicks() {
-        picksEl.innerHTML = "";
-        if (selections.size > 0) {
-          var full = remaining() === 0;
-          selections.forEach(function (item) {
-            var row = document.createElement("div");
-            row.className = "magyx-slot-builder__pick";
-            row.innerHTML =
-              (item.image
-                ? '<img class="magyx-slot-builder__pick-image" loading="lazy" src="' +
-                  item.image +
-                  '" alt="' +
-                  escapeHtml(item.title) +
-                  '">'
-                : '<div class="magyx-slot-builder__pick-image"></div>') +
-              '<div class="magyx-slot-builder__pick-info">' +
-              '<span class="magyx-slot-builder__pick-title">' +
-              escapeHtml(item.title) +
-              "</span>" +
-              (item.subtext
-                ? '<span class="magyx-slot-builder__pick-subtext">' +
-                  escapeHtml(item.subtext) +
-                  "</span>"
-                : "") +
-              "</div>" +
-              '<div class="magyx-slot-builder__pick-stepper">' +
-              '<button type="button" data-action="decrement" aria-label="' +
-              escapeHtml(t("a11yRemoveOne", { title: item.title })) +
-              '">−</button>' +
-              '<span class="magyx-slot-builder__pick-qty">' +
-              item.quantity +
-              "</span>" +
-              '<button type="button" data-action="increment" aria-label="' +
-              escapeHtml(t("a11yAddOne", { title: item.title })) +
-              '"' +
-              (full ? " disabled" : "") +
-              ">+</button>" +
-              "</div>" +
-              '<button type="button" class="magyx-slot-builder__pick-remove" aria-label="' +
-              escapeHtml(t("a11yRemove", { title: item.title })) +
-              '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>';
-            row
-              .querySelector('[data-action="increment"]')
-              .addEventListener("click", function () {
-                if (remaining() === 0) return;
-                item.quantity += 1;
-                selections.set(item.variantId, item);
-                update();
-                if (remaining() === 0) {
-                  setTimeout(closeModal, 350);
-                }
-              });
-            row
-              .querySelector('[data-action="decrement"]')
-              .addEventListener("click", function () {
-                item.quantity -= 1;
-                if (item.quantity <= 0) {
-                  selections.delete(item.variantId);
-                } else {
-                  selections.set(item.variantId, item);
-                }
-                update();
-              });
-            row
-              .querySelector(".magyx-slot-builder__pick-remove")
-              .addEventListener("click", function () {
-                selections.delete(item.variantId);
-                update();
-              });
-            picksEl.appendChild(row);
-          });
+      /* One row per slot, always `slotCount` of them — a filled slot shows
+         its product, an empty one is a tappable placeholder that opens the
+         picker. Replaces the old "one row per selection + a single Add Items
+         button" layout: showing the empty slots up front makes the size of
+         the job obvious before the shopper starts.
+
+         An item picked more than once occupies that many slots, so the rows
+         are the selections flattened by quantity rather than the Map itself.
+         Quantity is still adjusted from the picker's own steppers; a slot row
+         only removes, which decrements by one. */
+      function slotOccupants() {
+        var occupants = [];
+        selections.forEach(function (item) {
+          for (var i = 0; i < item.quantity; i++) occupants.push(item);
+        });
+        return occupants;
+      }
+
+      function renderSlots() {
+        slotsEl.innerHTML = "";
+        var occupants = slotOccupants();
+        var slots = activePackage().slotCount || 0;
+        for (var index = 0; index < slots; index++) {
+          slotsEl.appendChild(
+            occupants[index]
+              ? filledSlot(occupants[index], index)
+              : emptySlot(index),
+          );
         }
       }
 
-      /* ---- Progressive free gifts --------------------------------------
-         Every package's gifts render as cards: the active package's own and
-         every earlier package's are UNLOCKED — hidden behind a cosmetic
-         scratch-off foil the shopper can rub away. The active package's own
-         gifts stay LOCKED (blurred, padlock) until its slots are filled,
-         while later packages' render as EXCLUSIVE (light gray, padlock,
-         "{Package} Exclusive") to nudge shoppers toward the bigger pack;
-         clicking an exclusive card switches to the package that unlocks it. Purely presentational: checkout truth is the cumulative gift
-         list baked into the shop config metafield at sync time, so unlocked
-         gifts are added to the order whether or not they're scratched. */
+      function slotNumber(index) {
+        return (
+          '<span class="magyx-slot-builder__slot-number">' + (index + 1) + "</span>"
+        );
+      }
 
-      // Revealed foils, keyed by gift — survives package switches so an
-      // already-scratched gift never re-covers itself.
-      var scratchedGifts = {};
+      function filledSlot(item, index) {
+        var row = document.createElement("div");
+        row.className =
+          "magyx-slot-builder__slot magyx-slot-builder__slot--filled";
+        row.innerHTML =
+          slotNumber(index) +
+          (item.image
+            ? '<img class="magyx-slot-builder__slot-image" loading="lazy" src="' +
+              item.image +
+              '" alt="' +
+              escapeHtml(item.title) +
+              '">'
+            : '<div class="magyx-slot-builder__slot-image"></div>') +
+          '<div class="magyx-slot-builder__slot-info">' +
+          '<span class="magyx-slot-builder__slot-title">' +
+          escapeHtml(item.title) +
+          "</span>" +
+          (item.subtext
+            ? '<span class="magyx-slot-builder__slot-subtext">' +
+              escapeHtml(item.subtext) +
+              "</span>"
+            : "") +
+          "</div>" +
+          '<button type="button" class="magyx-slot-builder__slot-remove" aria-label="' +
+          escapeHtml(t("a11yRemove", { title: item.title })) +
+          '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>';
+        row
+          .querySelector(".magyx-slot-builder__slot-remove")
+          .addEventListener("click", function () {
+            // Frees this one slot, not every copy of the product.
+            item.quantity -= 1;
+            if (item.quantity <= 0) selections.delete(item.variantId);
+            else selections.set(item.variantId, item);
+            update();
+          });
+        return row;
+      }
+
+      // Phrasing content only — this row is itself a <button>, so it can't
+      // contain the <div>s the filled row uses.
+      function emptySlot(index) {
+        var row = document.createElement("button");
+        row.type = "button";
+        row.className = "magyx-slot-builder__slot magyx-slot-builder__slot--empty";
+        row.innerHTML =
+          slotNumber(index) +
+          '<span class="magyx-slot-builder__slot-image magyx-slot-builder__slot-image--empty">' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>' +
+          "</span>" +
+          '<span class="magyx-slot-builder__slot-info">' +
+          '<span class="magyx-slot-builder__slot-title">' +
+          escapeHtml(t("slotEmptyTitle")) +
+          "</span>" +
+          '<span class="magyx-slot-builder__slot-subtext">' +
+          escapeHtml(t("slotEmptyHint")) +
+          "</span>" +
+          "</span>" +
+          '<span class="magyx-slot-builder__slot-action">' +
+          escapeHtml(t("slotEmptyAction")) +
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>' +
+          "</span>";
+        row.addEventListener("click", openModal);
+        return row;
+      }
+
+      /* ---- Progressive free gifts --------------------------------------
+         Every package's gifts render as cards in two states, decided purely
+         by which package tab is active:
+         - UNLOCKED — the active package's own gifts and every earlier
+           package's. Shown plainly, image and title visible.
+         - EXCLUSIVE — a later package's gifts, rendered light gray behind a
+           padlock and "{Package} Exclusive" to nudge shoppers toward the
+           bigger pack; clicking one switches to the package that unlocks it.
+
+         Filling slots is deliberately NOT a condition: picking the tab is the
+         whole gesture, so the shopper sees what they've earned the moment
+         they choose a pack rather than having it withheld until the box is
+         full. Purely presentational either way — checkout truth is the
+         cumulative gift list baked into the shop config metafield at sync
+         time. */
 
       // Flattens every package's own gifts in unlock (tab) order, deduped by
       // variantId — the earliest package's entry wins, mirroring checkout's
       // cumulative merge. A package with free shipping enabled contributes
       // one extra virtual "gift" card (no variant/price, just a shipping
-      // icon) the first time it turns on, so the perk shows up in the same
-      // scratch-to-reveal flow as product gifts.
+      // icon) the first time it turns on, so the perk shows up alongside
+      // product gifts.
       function progressiveGifts() {
         var seen = {};
         var entries = [];
@@ -676,12 +669,11 @@ import {
             var key = String(gift.variantId || pkgIndex + ":" + giftIndex);
             if (seen[key]) return;
             seen[key] = true;
-            entries.push({ key: key, gift: gift, unlockIndex: pkgIndex });
+            entries.push({ gift: gift, unlockIndex: pkgIndex });
           });
           if (pkg && pkg.freeShipping && !shippingAdded) {
             shippingAdded = true;
             entries.push({
-              key: "free-shipping",
               gift: {
                 title: t("giftFreeShipping"),
                 isShipping: true,
@@ -693,113 +685,6 @@ import {
           }
         });
         return entries;
-      }
-
-      // Rubbing erases the foil (destination-out strokes); once ~40% is
-      // gone the whole thing fades out and the gift stays revealed.
-      function attachScratchFoil(body, key) {
-        var canvas = document.createElement("canvas");
-        canvas.className = "magyx-slot-builder__gift-foil";
-        body.appendChild(canvas);
-        var ctx = canvas.getContext("2d");
-        var scratching = false;
-        var lastPoint = null;
-        var revealed = false;
-
-        function paint() {
-          var rect = body.getBoundingClientRect();
-          if (rect.width === 0) return;
-          var dpr = window.devicePixelRatio || 1;
-          canvas.width = Math.round(rect.width * dpr);
-          canvas.height = Math.round(rect.height * dpr);
-          ctx.scale(dpr, dpr);
-          var w = rect.width;
-          var h = rect.height;
-          ctx.fillStyle = "#f7d63d";
-          ctx.fillRect(0, 0, w, h);
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.font = Math.round(Math.min(w, h) * 0.32) + "px serif";
-          ctx.fillText("🎁", w / 2, h * 0.38);
-          ctx.fillStyle = "#1a1a1a";
-          ctx.font = "800 " + Math.max(12, Math.round(w * 0.13)) + "px sans-serif";
-          ctx.fillText(t("giftScratch"), w / 2, h * 0.76);
-        }
-        // Deferred a frame: the card isn't laid out (zero-sized) until it's
-        // actually in the document.
-        requestAnimationFrame(paint);
-
-        function pointFrom(event) {
-          var rect = canvas.getBoundingClientRect();
-          return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-        }
-
-        function scratchTo(point) {
-          ctx.globalCompositeOperation = "destination-out";
-          ctx.lineWidth = 26;
-          ctx.lineCap = "round";
-          ctx.beginPath();
-          ctx.moveTo(lastPoint ? lastPoint.x : point.x, lastPoint ? lastPoint.y : point.y);
-          ctx.lineTo(point.x, point.y);
-          ctx.stroke();
-          lastPoint = point;
-        }
-
-        // Once 60% of the foil is rubbed away, the rest auto-clears — the
-        // shopper doesn't have to scratch every last pixel by hand.
-        var REVEAL_THRESHOLD = 0.6;
-
-        function scratchedRatio() {
-          var data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-          var cleared = 0;
-          var total = 0;
-          // Every 16th pixel's alpha is plenty to estimate coverage
-          for (var i = 3; i < data.length; i += 64) {
-            total += 1;
-            if (data[i] === 0) cleared += 1;
-          }
-          return total > 0 ? cleared / total : 0;
-        }
-
-        function reveal() {
-          if (revealed) return;
-          revealed = true;
-          scratchedGifts[key] = true;
-          canvas.classList.add("magyx-slot-builder__gift-foil--revealed");
-          // `body`'s parent is the card element, which also holds the title
-          // heading rendered (but hidden) alongside it — see renderGifts.
-          var card = body.parentElement;
-          var titleEl = card && card.querySelector(".magyx-slot-builder__gift-title");
-          if (titleEl) titleEl.hidden = false;
-          if (card) burstConfetti(card);
-          setTimeout(function () {
-            canvas.remove();
-          }, 400);
-        }
-
-        canvas.addEventListener("pointerdown", function (event) {
-          scratching = true;
-          lastPoint = null;
-          if (canvas.setPointerCapture) canvas.setPointerCapture(event.pointerId);
-          scratchTo(pointFrom(event));
-          if (scratchedRatio() >= REVEAL_THRESHOLD) reveal();
-        });
-        canvas.addEventListener("pointermove", function (event) {
-          if (!scratching || revealed) return;
-          scratchTo(pointFrom(event));
-          // Checked live so the auto-clear fires mid-scratch, not only once
-          // the shopper lifts their finger/mouse.
-          if (scratchedRatio() >= REVEAL_THRESHOLD) reveal();
-        });
-        canvas.addEventListener("pointerup", function () {
-          scratching = false;
-          lastPoint = null;
-          if (scratchedRatio() >= REVEAL_THRESHOLD) reveal();
-        });
-        canvas.addEventListener("pointercancel", function () {
-          scratching = false;
-          lastPoint = null;
-        });
       }
 
       function renderGifts() {
@@ -820,16 +705,11 @@ import {
         cards.className = "magyx-slot-builder__gift-cards";
         giftsEl.appendChild(cards);
 
-        // A gift only actually unlocks once its tier is reached AND the
-        // active package's own slots are filled — picking the "3 Pack" tab
-        // isn't enough on its own, the shopper still has to fill it.
-        var slotsFilled = remaining() === 0;
-
         entries.forEach(function (entry) {
           var gift = entry.gift;
-          var tierReached = entry.unlockIndex <= activePackageIndex;
-          var unlocked = tierReached && slotsFilled;
-          var lockedByTier = !tierReached;
+          // Reaching the tier is the only condition — see the note above
+          // progressiveGifts. Filling the box doesn't gate anything.
+          var unlocked = entry.unlockIndex <= activePackageIndex;
 
           var titleText = gift.isShipping ? t("giftFreeShipping") : gift.title;
           var unlockPkg = packages[entry.unlockIndex];
@@ -840,12 +720,13 @@ import {
             ? t("giftExclusive", { pack: unlockPkgLabel })
             : t("giftLocked");
 
+          // Only an exclusive card is interactive (it switches packs); an
+          // unlocked one is inert, so it stays a plain div.
           var card = document.createElement(unlocked ? "div" : "button");
           if (!unlocked) card.type = "button";
           card.className =
             "magyx-slot-builder__gift-card" +
-            (unlocked ? "" : " magyx-slot-builder__gift-card--locked") +
-            (lockedByTier ? " magyx-slot-builder__gift-card--exclusive" : "");
+            (unlocked ? "" : " magyx-slot-builder__gift-card--exclusive");
           card.title = (gift.quantity > 1 ? gift.quantity + " × " : "") + titleText;
 
           var quantity = gift.quantity || 1;
@@ -877,39 +758,22 @@ import {
               : "") +
             (unlocked
               ? ""
-              : lockedByTier
-                ? '<span class="magyx-slot-builder__gift-lock">' +
-                  '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path><circle cx="12" cy="15.5" r="1.5" fill="currentColor" stroke="none"></circle></svg>' +
-                  escapeHtml(lockLabel) +
-                  "</span>"
-                : '<span class="magyx-slot-builder__gift-lock">' +
-                  '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>' +
-                  escapeHtml(t("giftLocked")) +
-                  "</span>") +
+              : '<span class="magyx-slot-builder__gift-lock">' +
+                '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path><circle cx="12" cy="15.5" r="1.5" fill="currentColor" stroke="none"></circle></svg>' +
+                escapeHtml(lockLabel) +
+                "</span>") +
             "</div>" +
             (unlocked
-              ? '<p class="magyx-slot-builder__gift-title"' +
-                (scratchedGifts[entry.key] ? "" : " hidden") +
-                ">" +
+              ? '<p class="magyx-slot-builder__gift-title">' +
                 escapeHtml(titleText) +
                 "</p>"
               : "");
 
-          if (unlocked && !scratchedGifts[entry.key]) {
-            attachScratchFoil(
-              card.querySelector(".magyx-slot-builder__gift-body"),
-              entry.key,
-            );
-          }
-          if (lockedByTier) {
+          if (!unlocked) {
             var unlockIndex = entry.unlockIndex;
             card.addEventListener("click", function () {
               selectPackage(unlockIndex);
             });
-          } else if (!unlocked) {
-            // Reached this tier already, just hasn't filled its slots yet —
-            // send them straight to the picker instead of switching packs.
-            card.addEventListener("click", openModal);
           }
           cards.appendChild(card);
         });
@@ -1126,13 +990,11 @@ import {
 
       function update() {
         renderPrice();
-        renderPicks();
+        renderSlots();
         renderProgress();
         renderCta();
         renderNativeCta();
         renderModalHeader();
-        renderGifts();
-        openBtn.hidden = remaining() === 0;
         errorEl.hidden = true;
       }
 
@@ -1152,7 +1014,6 @@ import {
         modalEl.hidden = true;
       }
 
-      openBtn.addEventListener("click", openModal);
       // Queried from modalEl, not stateEl — the modal was moved out to
       // <body> above, so these are no longer stateEl's descendants.
       modalEl
@@ -1272,6 +1133,7 @@ import {
       }
 
       renderPacks();
+      renderGifts();
       update();
       syncActiveVariant();
     }

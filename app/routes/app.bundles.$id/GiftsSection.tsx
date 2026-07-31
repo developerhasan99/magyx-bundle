@@ -29,9 +29,8 @@ export function GiftsSection({
   openResourcePicker: (isGiftFlag: boolean) => void;
   freeShipping: boolean;
   onFreeShippingChange: (checked: boolean) => void;
-  // SLOT_BUILDER only: gifts unlock progressively across packages (this
-  // package's gifts ship with every later package too), and render on the
-  // storefront as scratch-to-reveal cards.
+  // SLOT_BUILDER only: gifts unlock progressively across packages — this
+  // package's gifts ship with every later package too.
   progressive?: boolean;
   // SLOT_BUILDER only: what earlier packages already contribute to this one.
   // Shown read-only — they're edited on the package that introduced them, so
@@ -56,7 +55,7 @@ export function GiftsSection({
       </InlineStack>
       <Text as="p" variant="bodySm" tone="subdued">
         {progressive
-          ? "Optional. Gifts unlock progressively: this package's gifts also ship free with every bigger package. On the storefront they appear as scratch-to-reveal cards — gifts from bigger packages show locked, nudging customers to upgrade. Unlocked gifts are always added to the order, scratched or not."
+          ? "Optional. Gifts unlock progressively: this package's gifts also ship free with every bigger package. On the storefront, customers see them as soon as they pick this package — gifts from bigger packages show locked, nudging them to upgrade."
           : "Optional. These products are always included at no extra cost alongside the bundle — they don't affect its price."}
       </Text>
       <Checkbox
