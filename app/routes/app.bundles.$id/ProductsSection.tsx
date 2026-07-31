@@ -350,27 +350,30 @@ export function ProductsSection({
       {tagFilters && setTagFilters && (
         <BlockStack gap="300">
           <Divider />
-          <InlineStack align="space-between" blockAlign="center">
-            <BlockStack gap="050">
+          <BlockStack gap="100">
+            {/* Heading and button share one row — same as every other section
+                header here. The description sits below rather than inside the
+                row: at three lines it pushed the button onto its own line. */}
+            <InlineStack align="space-between" blockAlign="center">
               <Text as="h3" variant="headingSm">
                 Filter buttons
               </Text>
-              <Text as="p" variant="bodySm" tone="subdued">
-                Shown as round buttons in the product-pick window, before the
-                search field. Customers tap one to narrow the pool to products
-                carrying that tag — an &quot;All&quot; button is added
-                automatically.
-              </Text>
-            </BlockStack>
-            <Button
-              icon={PlusIcon}
-              onClick={() =>
-                setTagFilters((current) => [...current, { label: "", tag: "" }])
-              }
-            >
-              Add filter
-            </Button>
-          </InlineStack>
+              <Button
+                icon={PlusIcon}
+                onClick={() =>
+                  setTagFilters((current) => [...current, { label: "", tag: "" }])
+                }
+              >
+                Add filter
+              </Button>
+            </InlineStack>
+            <Text as="p" variant="bodySm" tone="subdued">
+              Shown as round buttons in the product-pick window, before the
+              search field. Customers tap one to narrow the pool to products
+              carrying that tag — an &quot;All&quot; button is added
+              automatically.
+            </Text>
+          </BlockStack>
           {tagFilters.length > 0 && (
             <BlockStack gap="200">
               {tagFilters.map((filter, index) => (

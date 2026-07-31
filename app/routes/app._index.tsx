@@ -87,7 +87,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
 
 const typeLabel: Record<string, string> = {
   FIXED: "Fixed",
-  SLOT_BUILDER: "Bundle builder",
+  SLOT_BUILDER: "Build a box",
   MIX_MATCH: "Mix & match",
   QUANTITY_BREAKS: "Quantity breaks",
 };
@@ -275,13 +275,13 @@ export default function Dashboard() {
                   tracked per component.
                 </Text>
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  <strong>Bundle builders</strong> are bundle products with
-                  numbered slots — customers fill every slot by picking from a
-                  pool of products you choose.
+                  <strong>Build a box</strong> bundles have a set number of
+                  slots at one flat price — customers fill every slot by
+                  picking from a pool of products you choose.
                 </Text>
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  <strong>Mix &amp; match bundles</strong> let customers build
-                  their own box from products you choose, with tiered discounts
+                  <strong>Mix &amp; match bundles</strong> let customers pick
+                  any quantity from products you choose, with tiered discounts
                   applied automatically at checkout.
                 </Text>
               </BlockStack>

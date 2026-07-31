@@ -56,10 +56,11 @@ function buildExpandOperation(line, componentsValue) {
   const components = data?.components;
   if (!Array.isArray(components) || components.length === 0) return null;
 
-  // Bundles with free shipping enabled stamp this attribute onto their first
-  // expanded line so the magyx-free-shipping Discount Function can detect it
-  // — a Discount Function only ever sees the expanded lines, not the parent
-  // bundle line, so there's no other way to carry this through.
+  // Marks the expanded line as belonging to a free-shipping bundle. NOT what
+  // actually waives shipping — the magyx-free-shipping Discount Function
+  // can't see this, since it runs against the cart as it was before this
+  // expand; it reads the same `freeShipping` flag off the variant metafield
+  // instead. Kept only as a diagnostic breadcrumb on the order.
   const freeShippingAttributes = data?.freeShipping
     ? [{ key: "_magyx_free_shipping", value: "true" }]
     : [];

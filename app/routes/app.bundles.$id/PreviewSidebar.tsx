@@ -93,7 +93,7 @@ export function PreviewSidebar({
               {type === "FIXED"
                 ? "Fixed"
                 : type === "SLOT_BUILDER"
-                  ? "Bundle builder"
+                  ? "Build a box"
                   : type === "QUANTITY_BREAKS"
                     ? "Quantity breaks"
                     : "Mix & match"}

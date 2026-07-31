@@ -67,6 +67,14 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
         // package order.
         const cumulativeGiftsByPackage: { variantId: string; quantity: number }[][] = [];
         const giftQtyByVariant = new Map<string, number>();
+        // Free shipping is a gift like any other, so it inherits the same way:
+        // once a package turns it on, every bigger package keeps it. The
+        // storefront widget already renders it that way (its virtual shipping
+        // card unlocks at the first package that enables it and stays
+        // unlocked), so anything less here would promise the perk and then
+        // charge for it.
+        const cumulativeFreeShippingByPackage: boolean[] = [];
+        let freeShippingSoFar = false;
         for (const p of b.packages) {
           for (const i of p.items) {
             if (!i.isGift || !i.variantId) continue;
@@ -78,6 +86,8 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
           cumulativeGiftsByPackage.push(
             Array.from(giftQtyByVariant, ([variantId, quantity]) => ({ variantId, quantity })),
           );
+          freeShippingSoFar = freeShippingSoFar || p.freeShipping;
+          cumulativeFreeShippingByPackage.push(freeShippingSoFar);
         }
         slotBuilderPackages = await Promise.all(
           b.packages.map(async (p, index) => {
@@ -88,7 +98,7 @@ export async function syncBundleConfigMetafield(admin: AdminApiContext, shop: st
                 : await resolveCollectionProductIds(admin, JSON.parse(p.collectionIds));
             return {
               shopifyVariantId: p.shopifyVariantId,
-              freeShipping: p.freeShipping,
+              freeShipping: cumulativeFreeShippingByPackage[index],
               slotCount: p.slotCount,
               slotPoolProductIds,
               gifts: cumulativeGiftsByPackage[index],
@@ -1556,13 +1566,41 @@ export async function publishSlotBuilderBundleProduct(
     );
   }
 
-  const variantUpdates = input.packages.map((pkg) => {
+  // Free shipping inherits forward across packages, exactly like free gifts:
+  // once a package enables it, every bigger one keeps it. `input.packages` is
+  // in position (tab) order, so a running flag is all this needs. Kept in
+  // step with syncBundleConfigMetafield's cumulativeFreeShippingByPackage.
+  let freeShippingSoFar = false;
+  const cumulativeFreeShipping = input.packages.map((pkg) => {
+    freeShippingSoFar = freeShippingSoFar || pkg.freeShipping;
+    return freeShippingSoFar;
+  });
+
+  const variantUpdates = input.packages.map((pkg, index) => {
     const combinedPrice = combinedPriceByPackageId.get(pkg.packageId) ?? 0;
     return {
       id: variantIdByPackageId.get(pkg.packageId)!,
       price: pkg.pricingValue.toFixed(2),
       // Cleared when there's no actual saving so themes don't show "$X $X"
       compareAtPrice: combinedPrice > pkg.pricingValue ? combinedPrice.toFixed(2) : null,
+      // The free-shipping Discount Function reads `freeShipping` off this
+      // metafield (see extensions/magyx-free-shipping/src/run.js) — it can't
+      // use the `_magyx_free_shipping` attribute the Cart Transform stamps,
+      // because a discount function sees the cart as it was *before* the
+      // transform's expand ran. Deliberately carries NO `components` array:
+      // the Cart Transform expands any line whose variant has one, and a
+      // Bundle Builder line must instead go through the slot-selection path
+      // that validates the customer's picks against the package's pool.
+      // Written on every publish (not just when enabled) so turning the
+      // toggle back off clears the previously-published `true`.
+      metafields: [
+        {
+          namespace: CONFIG_NAMESPACE,
+          key: "components",
+          type: "json",
+          value: JSON.stringify({ freeShipping: cumulativeFreeShipping[index] }),
+        },
+      ],
     };
   });
 

@@ -21,6 +21,8 @@ export function GiftsSection({
   freeShipping,
   onFreeShippingChange,
   progressive = false,
+  inheritedGiftItems = [],
+  inheritedFreeShipping = false,
 }: {
   giftItems: ItemState[];
   setActiveItems: (updater: (current: ItemState[]) => ItemState[]) => void;
@@ -31,7 +33,17 @@ export function GiftsSection({
   // package's gifts ship with every later package too), and render on the
   // storefront as scratch-to-reveal cards.
   progressive?: boolean;
+  // SLOT_BUILDER only: what earlier packages already contribute to this one.
+  // Shown read-only — they're edited on the package that introduced them, so
+  // making them editable here would beg the question of which package a change
+  // applies to.
+  inheritedGiftItems?: ItemState[];
+  inheritedFreeShipping?: boolean;
 }) {
+  // An earlier package already granted it, so this package has it either way —
+  // reflect that rather than showing an unchecked box for a perk the customer
+  // does get. Still togglable when nothing upstream provides it.
+  const freeShippingChecked = freeShipping || inheritedFreeShipping;
   return (
     <BlockStack gap="400">
       <InlineStack align="space-between" blockAlign="center">
@@ -49,9 +61,14 @@ export function GiftsSection({
       </Text>
       <Checkbox
         label="Include free shipping as a gift"
-        checked={freeShipping}
+        checked={freeShippingChecked}
+        disabled={inheritedFreeShipping}
         onChange={onFreeShippingChange}
-        helpText="Waives shipping at checkout when a customer buys this bundle."
+        helpText={
+          inheritedFreeShipping
+            ? "Already on from an earlier package — free shipping carries forward to every bigger package. Turn it off there to remove it here."
+            : "Waives shipping at checkout when a customer buys this bundle."
+        }
       />
       {giftItems.length === 0 ? (
         <Box padding="400">
@@ -130,6 +147,44 @@ export function GiftsSection({
             </Box>
           ))}
         </BlockStack>
+      )}
+      {inheritedGiftItems.length > 0 && (
+        <>
+          <Divider />
+          <BlockStack gap="200">
+            <Text as="h3" variant="headingSm">
+              Also included from earlier packages
+            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              These ship with this package too. Edit them on the package that
+              added them.
+            </Text>
+            <BlockStack gap="200">
+              {inheritedGiftItems.map((item) => (
+                <InlineStack
+                  key={item.variantId ?? item.productId}
+                  gap="300"
+                  blockAlign="center"
+                  wrap={false}
+                >
+                  <Thumbnail
+                    source={item.productImageUrl || ImageIcon}
+                    alt={item.productTitle}
+                    size="small"
+                  />
+                  <Text as="span" variant="bodyMd" tone="subdued">
+                    {item.productTitle}
+                  </Text>
+                  {item.quantity > 1 && (
+                    <Text as="span" variant="bodySm" tone="subdued">
+                      ×{item.quantity}
+                    </Text>
+                  )}
+                </InlineStack>
+              ))}
+            </BlockStack>
+          </BlockStack>
+        </>
       )}
     </BlockStack>
   );

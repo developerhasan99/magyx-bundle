@@ -4,14 +4,16 @@ import { DiscountClass } from "../generated/api";
 /**
  * Magyx Free Shipping
  *
- * Waives shipping whenever the cart contains a FIXED bundle whose merchant
- * enabled free shipping. Reads the `freeShipping` flag straight off the
- * bundle variant's `$app:magyx-bundle/components` metafield — the same
- * source the bundle-pricing Cart Transform function reads (see
- * buildExpandOperation in extensions/bundle-pricing/src/run.js) — rather than
- * a cart line attribute, because this function's `cart` input reflects the
+ * Waives shipping whenever the cart contains a FIXED or SLOT_BUILDER bundle
+ * whose merchant enabled free shipping on the purchased package. Reads the
+ * `freeShipping` flag straight off the bundle variant's
+ * `$app:magyx-bundle/components` metafield — written per package variant by
+ * publishFixedBundleProduct/publishSlotBuilderBundleProduct — rather than a
+ * cart line attribute, because this function's `cart` input reflects the
  * cart as it existed before the Cart Transform's expand ran, so any
  * attribute the transform stamps onto its expanded lines isn't visible here.
+ * (Bundle Builder variants carry that metafield for this flag alone, with no
+ * `components` array, so the Cart Transform doesn't treat them as FIXED.)
  */
 
 const NO_CHANGES = { operations: [] };

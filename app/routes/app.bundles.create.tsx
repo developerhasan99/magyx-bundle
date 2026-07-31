@@ -20,15 +20,15 @@ const BUNDLE_TYPE_CHOICES = [
   },
   {
     value: "SLOT_BUILDER",
-    label: "Bundle builder",
+    label: "Build a box",
     description:
-      "A product with numbered slots — customers fill each slot from a pool of products.",
+      "Customers fill a set number of slots from a pool of products, for one flat price.",
   },
   {
     value: "MIX_MATCH",
     label: "Mix & match",
     description:
-      "Customers choose their own items from a list, with tiered discounts.",
+      "Customers pick any quantity from a list, with tiered discounts as they add more.",
   },
   {
     value: "QUANTITY_BREAKS",

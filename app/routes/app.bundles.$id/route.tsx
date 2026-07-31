@@ -54,7 +54,7 @@ import { PackagesTabsSection } from "./PackagesTabsSection";
 import { QuantityBreaksTiersSection } from "./QuantityBreaksTiersSection";
 import { QuantityBreaksWidgetSection } from "./QuantityBreaksWidgetSection";
 import { MixMatchRulesSection } from "./MixMatchRulesSection";
-import { FixedAppearanceSection } from "./FixedAppearanceSection";
+import { AppearanceSection } from "./AppearanceSection";
 import { PreviewSidebar } from "./PreviewSidebar";
 
 const CREATABLE_BUNDLE_TYPES = ["FIXED", "SLOT_BUILDER", "MIX_MATCH", "QUANTITY_BREAKS"];
@@ -927,6 +927,37 @@ export default function BundleBuilder() {
   const paidItems = useMemo(() => activeItems.filter((i) => !i.isGift), [activeItems]);
   const giftItems = useMemo(() => activeItems.filter((i) => i.isGift), [activeItems]);
 
+  // SLOT_BUILDER gifts and free shipping inherit forward: a package ships its
+  // own plus every earlier package's (see syncBundleConfigMetafield). The
+  // editor only ever shows one package's own items, so surface what's coming
+  // from upstream too — otherwise a merchant reads an empty gift list or an
+  // unchecked free-shipping box as "this package has none".
+  const earlierPackages = useMemo(
+    () => (type === "SLOT_BUILDER" ? packages.slice(0, activePackageIndex) : []),
+    [type, packages, activePackageIndex],
+  );
+  const inheritedFreeShipping = useMemo(
+    () => earlierPackages.some((p) => p.freeShipping),
+    [earlierPackages],
+  );
+  // Deduped by variant, and anything this package defines itself is dropped —
+  // that copy is already editable in the list above.
+  const inheritedGiftItems = useMemo(() => {
+    const ownKeys = new Set(giftItems.map((i) => i.variantId ?? i.productId));
+    const seen = new Set<string>();
+    const inherited: ItemState[] = [];
+    for (const pkg of earlierPackages) {
+      for (const item of pkg.items) {
+        if (!item.isGift) continue;
+        const key = item.variantId ?? item.productId;
+        if (ownKeys.has(key) || seen.has(key)) continue;
+        seen.add(key);
+        inherited.push(item);
+      }
+    }
+    return inherited;
+  }, [earlierPackages, giftItems]);
+
   const isSaving = fetcher.state !== "idle";
 
   // Per-package collectionPoolItems is live preview data fetched on demand
@@ -1753,6 +1784,8 @@ export default function BundleBuilder() {
                         updateActivePackage({ freeShipping: checked })
                       }
                       progressive
+                      inheritedGiftItems={inheritedGiftItems}
+                      inheritedFreeShipping={inheritedFreeShipping}
                     />
                     <Divider />
                     <ProductsSection
@@ -1840,7 +1873,8 @@ export default function BundleBuilder() {
 
               {(type === "FIXED" || type === "SLOT_BUILDER") && (
                 <Card>
-                  <FixedAppearanceSection
+                  <AppearanceSection
+                    type={type}
                     widgetStyle={widgetStyle}
                     setWidgetStyle={setWidgetStyle}
                     accentColor={accentColor}
@@ -1853,7 +1887,6 @@ export default function BundleBuilder() {
                     setItemSubtextTemplate={setItemSubtextTemplate}
                     showSubtextOnGifts={showSubtextOnGifts}
                     setShowSubtextOnGifts={setShowSubtextOnGifts}
-                    showSkipCartOption={type === "SLOT_BUILDER"}
                     skipCart={skipCart}
                     setSkipCart={setSkipCart}
                   />
