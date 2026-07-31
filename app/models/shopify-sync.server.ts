@@ -1,8 +1,10 @@
 import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 import { getBundles, setBundleProduct, setPackageVariant } from "./bundle.server";
-import type {
-  PackageTranslations,
-  SlotBuilderTranslations,
+import {
+  composeProductTitle,
+  localizedProductTitle,
+  type PackageTranslations,
+  type SlotBuilderTranslations,
 } from "../utils/slot-builder-text";
 
 const CONFIG_NAMESPACE = "$app:magyx-bundle";
@@ -686,9 +688,22 @@ export interface ProductPoolItem {
   productId: string;
   variantId: string;
   title: string;
+  // Per-locale versions of `title`, present only where the merchant actually
+  // translated the product in Translate & Adapt. Baked into the publish-time
+  // pool snapshot so the widget renders localized titles immediately instead
+  // of flashing the primary language until the live fetch lands. The live
+  // proxy serves one locale and localizes `title` directly, so items from
+  // that path have no map here — the widget falls back to `title` either way.
+  titleByLocale?: Record<string, string>;
+  // Raw, always-untranslated product title. `title` above combines it with
+  // `variantTitle`; keeping the parts lets a translated title be recomposed
+  // without re-fetching, and keeps the composition rule in one place.
+  productTitle: string;
   // Raw variant title (e.g. "50ml"), separate from the combined `title`
   // above (e.g. "Product — 50ml") — lets callers filter by variant text
   // without accidentally matching text in the product's own name.
+  // Deliberately never translated: `variantFilter` matches against it, and a
+  // merchant's "50" filter must keep working on every locale.
   variantTitle: string;
   image: string | null;
   price: number;
@@ -722,6 +737,167 @@ async function attachPoolItemSubtext(
     }
   } catch (error) {
     console.warn("Magyx Bundle: could not resolve pool item subtext", error);
+  }
+}
+
+// Shopify locales are IETF tags; this is only ever fed values that came back
+// from shopLocales or a storefront's own request.locale, but the tags get
+// interpolated into a GraphQL query string below (there's no variable form
+// for an aliased field argument), so anything unexpected is dropped rather
+// than trusted.
+const SAFE_LOCALE = /^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$/;
+
+/**
+ * Translated `title` for each of `ids` (products and/or variants), for every
+ * requested locale at once: gid -> { locale -> title }. Only entries the
+ * merchant actually translated come back, so a caller can treat a missing
+ * key as "use the untranslated title".
+ *
+ * Every locale in one request rather than one per locale — `translations`
+ * takes a single locale, so each is asked for under its own GraphQL alias.
+ *
+ * Needs the `read_translations` access scope. Soft-fails to an empty map:
+ * untranslated titles are a much better outcome than a pool that won't load,
+ * and a merchant who hasn't re-consented after the scope was added would
+ * otherwise lose the whole widget.
+ */
+// `nodes(ids:)` accepts at most 250 ids, and a pool item contributes two (its
+// product and its variant) — a 60-item snapshot across a few packages clears
+// that on its own. Kept well under the cap because each id also carries one
+// `translations` selection per locale, which counts toward the query's cost.
+const TRANSLATION_ID_CHUNK = 100;
+
+export async function fetchTitleTranslations(
+  admin: AdminApiContext,
+  ids: string[],
+  locales: string[],
+): Promise<Map<string, Record<string, string>>> {
+  const byId = new Map<string, Record<string, string>>();
+  const safeLocales = Array.from(new Set(locales.filter((l) => SAFE_LOCALE.test(l))));
+  if (ids.length === 0 || safeLocales.length === 0) return byId;
+
+  // Locale tags contain hyphens, which aren't valid in a GraphQL alias, so
+  // aliases are positional and mapped back by index.
+  const aliases = safeLocales.map((locale, index) => ({ alias: `l${index}`, locale }));
+  const selection = aliases
+    .map(({ alias, locale }) => `${alias}: translations(locale: "${locale}") { key value }`)
+    .join(" ");
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += TRANSLATION_ID_CHUNK) {
+    chunks.push(ids.slice(i, i + TRANSLATION_ID_CHUNK));
+  }
+
+  try {
+    const responses = await Promise.all(
+      chunks.map((chunk) =>
+        admin.graphql(
+          `#graphql
+          query magyxTitleTranslations($ids: [ID!]!) {
+            nodes(ids: $ids) {
+              ... on Product { id ${selection} }
+              ... on ProductVariant { id ${selection} }
+            }
+          }`,
+          { variables: { ids: chunk } },
+        ),
+      ),
+    );
+    for (const response of responses) {
+      const json = (await response.json()) as {
+        data?: { nodes?: ({ id: string } & Record<string, unknown>)[] };
+        errors?: unknown[];
+      };
+      if (json.errors?.length) {
+        console.warn("Magyx Bundle: title translations query returned errors", json.errors);
+        // Partial results are still worth keeping — a throttled chunk costs
+        // those items their translation, not everyone else's.
+        continue;
+      }
+      for (const node of json.data?.nodes ?? []) {
+        if (!node?.id) continue;
+        const titles: Record<string, string> = {};
+        for (const { alias, locale } of aliases) {
+          const entries = node[alias] as { key: string; value: string | null }[] | undefined;
+          const title = entries?.find((e) => e.key === "title")?.value;
+          if (title) titles[locale] = title;
+        }
+        if (Object.keys(titles).length > 0) byId.set(node.id, titles);
+      }
+    }
+  } catch (error) {
+    console.warn("Magyx Bundle: could not load title translations", error);
+  }
+  return byId;
+}
+
+/* Both pool-item localizers need the same lookup: the product part and the
+   variant part are translated independently, so each is resolved on its own
+   before localizedProductTitle recomposes them. */
+function localizedPoolItemTitle(
+  item: ProductPoolItem,
+  translations: Map<string, Record<string, string>>,
+  locale: string,
+): string {
+  return localizedProductTitle(item, {
+    product: translations.get(item.productId)?.[locale],
+    variant: translations.get(item.variantId)?.[locale],
+  });
+}
+
+function poolItemTranslationIds(items: ProductPoolItem[]): string[] {
+  return Array.from(
+    new Set(items.flatMap((item) => [item.productId, item.variantId])),
+  );
+}
+
+/**
+ * Rewrites each item's `title` into `locale`, in place. For the live app
+ * proxy, which serves exactly one shopper's locale per request.
+ */
+export async function localizePoolItemTitles(
+  admin: AdminApiContext,
+  items: ProductPoolItem[],
+  locale: string | null | undefined,
+): Promise<void> {
+  const tag = (locale ?? "").trim();
+  if (items.length === 0 || !tag) return;
+  const translations = await fetchTitleTranslations(admin, poolItemTranslationIds(items), [tag]);
+  if (translations.size === 0) return;
+  for (const item of items) {
+    const translated = localizedPoolItemTitle(item, translations, tag);
+    if (translated) item.title = translated;
+  }
+}
+
+/**
+ * Attaches a `titleByLocale` map to each item, in place. For the publish-time
+ * snapshot, which has to serve every shopper regardless of locale.
+ *
+ * Only locales whose title actually differs from the untranslated one are
+ * stored. The snapshot is already the biggest thing in the display metafield
+ * and this would otherwise multiply its title bytes by the shop's language
+ * count — most of it duplicating text the widget would fall back to anyway.
+ */
+export async function attachPoolItemTitlesByLocale(
+  admin: AdminApiContext,
+  items: ProductPoolItem[],
+  locales: string[],
+): Promise<void> {
+  if (items.length === 0 || locales.length === 0) return;
+  const translations = await fetchTitleTranslations(
+    admin,
+    poolItemTranslationIds(items),
+    locales,
+  );
+  if (translations.size === 0) return;
+  for (const item of items) {
+    const byLocale: Record<string, string> = {};
+    for (const locale of locales) {
+      const translated = localizedPoolItemTitle(item, translations, locale);
+      if (translated && translated !== item.title) byLocale[locale] = translated;
+    }
+    if (Object.keys(byLocale).length > 0) item.titleByLocale = byLocale;
   }
 }
 
@@ -787,11 +963,11 @@ export async function fetchProductPoolItems(
     for (const edge of product.variants?.edges ?? []) {
       const variant = edge.node;
       if (trimmedFilter && !(variant.title ?? "").toLowerCase().includes(trimmedFilter)) continue;
-      const hasRealVariantTitle = variant.title && variant.title !== "Default Title";
       items.push({
         productId: product.id,
         variantId: variant.id,
-        title: hasRealVariantTitle ? `${product.title} — ${variant.title}` : product.title,
+        title: composeProductTitle(product.title, variant.title ?? ""),
+        productTitle: product.title,
         variantTitle: variant.title ?? "",
         image: variant.image?.url ?? product.featuredImage?.url ?? null,
         price: parseFloat(variant.price),
@@ -846,11 +1022,11 @@ export async function fetchVariantPoolItems(
   const items: ProductPoolItem[] = [];
   for (const variant of json.data?.nodes ?? []) {
     if (!variant || !variant.product) continue;
-    const hasRealVariantTitle = variant.title && variant.title !== "Default Title";
     items.push({
       productId: variant.product.id,
       variantId: variant.id,
-      title: hasRealVariantTitle ? `${variant.product.title} — ${variant.title}` : variant.product.title,
+      title: composeProductTitle(variant.product.title, variant.title ?? ""),
+      productTitle: variant.product.title,
       variantTitle: variant.title ?? "",
       image: variant.image?.url ?? variant.product.featuredImage?.url ?? null,
       price: parseFloat(variant.price),
@@ -1470,8 +1646,10 @@ export interface ShopLocale {
  * dropped: a merchant can't show them to shoppers yet, so offering fields
  * for them is just clutter.
  *
- * Soft-fails to a single "en" primary — a locale lookup hiccup should cost
- * the merchant the translation UI, not the whole bundle editor.
+ * Needs the `read_locales` access scope. Returns [] when the lookup fails —
+ * never a made-up default. An earlier version fell back to a lone English
+ * primary, which on a Swedish shop confidently told the merchant their store
+ * was in English; callers must treat [] as "unknown", not as "English".
  */
 export async function fetchShopLocales(admin: AdminApiContext): Promise<ShopLocale[]> {
   try {
@@ -1481,14 +1659,25 @@ export async function fetchShopLocales(admin: AdminApiContext): Promise<ShopLoca
         shopLocales(published: true) { locale name primary }
       }`,
     );
-    const locales = (await response.json()).data?.shopLocales ?? [];
-    if (locales.length === 0) return [{ locale: "en", name: "English", primary: true }];
-    return [...locales].sort(
-      (a: ShopLocale, b: ShopLocale) => Number(b.primary) - Number(a.primary),
-    );
+    // The SDK's response body type only models `data`, but GraphQL puts
+    // field-level failures (a missing access scope among them) in a top-level
+    // `errors` array alongside it.
+    const json = (await response.json()) as {
+      data?: { shopLocales?: ShopLocale[] };
+      errors?: unknown[];
+    };
+    // A missing scope comes back as HTTP 200 with a populated `errors` array
+    // and no data, so it never reaches the catch below — check explicitly or
+    // the failure is invisible.
+    if (json.errors?.length) {
+      console.warn("Magyx Bundle: shopLocales query returned errors", json.errors);
+      return [];
+    }
+    const locales: ShopLocale[] = json.data?.shopLocales ?? [];
+    return [...locales].sort((a, b) => Number(b.primary) - Number(a.primary));
   } catch (error) {
     console.warn("Magyx Bundle: could not load shop locales", error);
-    return [{ locale: "en", name: "English", primary: true }];
+    return [];
   }
 }
 
@@ -1778,6 +1967,54 @@ export async function publishSlotBuilderBundleProduct(
       }),
     );
 
+    /* Product names come from the merchant's catalog, so they're translated
+       in Translate & Adapt rather than in this app's Translations card. The
+       snapshot has to serve every shopper regardless of locale, so it carries
+       a title per published language; the primary one is skipped because the
+       untranslated title already is that language. Localized after the
+       per-package fetches above so it's one batched lookup for the whole
+       bundle instead of one per package. */
+    const secondaryLocales = (await fetchShopLocales(admin))
+      .filter((l) => !l.primary)
+      .map((l) => l.locale);
+    if (secondaryLocales.length > 0) {
+      await attachPoolItemTitlesByLocale(
+        admin,
+        poolSnapshotsByPackage.flat(),
+        secondaryLocales,
+      );
+    }
+
+    /* Gift titles aren't fetched live like pool items — they're snapshotted
+       into Postgres by the admin's product picker — so they need their own
+       lookup. Keyed by variant first, product second: a gift pinned to a
+       specific variant should follow that variant's translation, and only a
+       variant-less gift falls back to its product's. An untranslated gift
+       gets no entry and keeps the merchant's own snapshotted title. */
+    const giftTitlesByLocale = new Map<string, Record<string, string>>();
+    if (secondaryLocales.length > 0 && allGiftDisplayItems.length > 0) {
+      const giftIds = Array.from(
+        new Set(
+          allGiftDisplayItems.flatMap((item) =>
+            item.variantId ? [item.variantId, item.productId] : [item.productId],
+          ),
+        ),
+      );
+      const giftTranslations = await fetchTitleTranslations(admin, giftIds, secondaryLocales);
+      for (const item of allGiftDisplayItems) {
+        const key = item.variantId ?? item.productId;
+        if (giftTitlesByLocale.has(key)) continue;
+        const byLocale: Record<string, string> = {};
+        for (const locale of secondaryLocales) {
+          const translated =
+            (item.variantId ? giftTranslations.get(item.variantId)?.[locale] : undefined) ??
+            giftTranslations.get(item.productId)?.[locale];
+          if (translated && translated !== item.title) byLocale[locale] = translated;
+        }
+        if (Object.keys(byLocale).length > 0) giftTitlesByLocale.set(key, byLocale);
+      }
+    }
+
     const displayValue = {
       bundleId: input.bundleId,
       settings: {
@@ -1807,6 +2044,7 @@ export async function publishSlotBuilderBundleProduct(
         gifts: pkg.giftDisplayItems.map((item) => ({
           variantId: item.variantId,
           title: item.title,
+          titleByLocale: giftTitlesByLocale.get(item.variantId ?? item.productId),
           imageUrl: item.imageUrl,
           quantity: item.quantity,
           price: item.variantId ? (priceByVariant.get(item.variantId) ?? null) : null,

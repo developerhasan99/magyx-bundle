@@ -7,6 +7,7 @@
    esbuild's --bundle (see the build:widget-js script); nothing is fetched at
    runtime. */
 import {
+  buildLocaleValueResolver,
   buildPackageTextResolver,
   buildTranslator,
 } from "../app/utils/slot-builder-text";
@@ -163,6 +164,32 @@ import {
       return;
     }
 
+    /* Product and gift names come from the merchant's catalog, so they're
+       translated in Shopify's own Translate & Adapt rather than in this app's
+       Translations card — they arrive as a `titleByLocale` map beside the
+       untranslated `title`. Collapsed to a single `title` once, up front, so
+       every render site downstream stays locale-agnostic.
+
+       Only the baked-in snapshot and gifts need this. The live pool fetch
+       below is given the shopper's locale and returns titles already in it,
+       with no map attached — and an older metafield with no maps at all just
+       keeps its untranslated titles. */
+    var localizedTitle = buildLocaleValueResolver(
+      settings.primaryLocale,
+      root.dataset.locale,
+    );
+    function applyLocalizedTitles(items) {
+      (items || []).forEach(function (item) {
+        if (item && item.titleByLocale) {
+          item.title = localizedTitle(item.titleByLocale, item.title);
+        }
+      });
+    }
+    packages.forEach(function (pkg) {
+      applyLocalizedTitles(pkg.poolSnapshot);
+      applyLocalizedTitles(pkg.gifts);
+    });
+
     // Bundle-scoped snapshot baked in at publish time (a bounded handful of
     // items per package, not the merchant's whole catalog/collection) lets
     // the widget render immediately, and keeps it working even if the live
@@ -182,8 +209,14 @@ import {
         "</div>";
     }
 
+    // The locale rides in the query string, not a header, so it's part of the
+    // URL the 60s Cache-Control applies to — a Swedish shopper and an English
+    // one can't be served each other's cached titles.
     fetch(
-      "/apps/magyx-bundle/slot-builder/" + encodeURIComponent(data.bundleId),
+      "/apps/magyx-bundle/slot-builder/" +
+        encodeURIComponent(data.bundleId) +
+        "?locale=" +
+        encodeURIComponent(root.dataset.locale || ""),
     )
       .then(function (response) {
         if (!response.ok) throw new Error("Bundle builder unavailable");

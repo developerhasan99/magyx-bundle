@@ -544,8 +544,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       // The widget falls back to this locale's copy before falling back to
       // its own built-in English, so a shop whose default copy isn't English
       // stays in its own language on markets it hasn't translated for.
+      // Empty when the locale lookup failed — guessing "en" here would point
+      // the widget's fallback at a bucket that doesn't exist on, say, a
+      // Swedish shop. The widget skips an empty locale in the chain.
       const primaryLocale =
-        (await fetchShopLocales(admin)).find((l) => l.primary)?.locale ?? "en";
+        (await fetchShopLocales(admin)).find((l) => l.primary)?.locale ?? "";
       await publishSlotBuilderBundleProduct(
         admin,
         {

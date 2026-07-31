@@ -4,6 +4,7 @@ import { getBundle } from "../models/bundle.server";
 import {
   fetchProductPoolItems,
   fetchVariantPoolItems,
+  localizePoolItemTitles,
   resolveCollectionProductIds,
 } from "../models/shopify-sync.server";
 
@@ -61,6 +62,16 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     fetchVariantPoolItems(admin, allVariantIds, bundle.itemSubtextTemplate),
     fetchProductPoolItems(admin, allProductIds, bundle.itemSubtextTemplate),
   ]);
+
+  // Product names live in the merchant's catalog, so they're translated in
+  // Translate & Adapt, not in this app. The widget passes the storefront's
+  // active language; one batched lookup rewrites both pools' titles into it.
+  // Soft-fails inside the helper — untranslated titles beat an empty pool.
+  // Safe to do before the variantFilter pass below: that matches on
+  // `variantTitle`, which is never translated on purpose (see ProductPoolItem),
+  // so a merchant's "50ml" filter keeps working in every language.
+  const locale = new URL(request.url).searchParams.get("locale");
+  await localizePoolItemTitles(admin, [...variantItems, ...productItems], locale);
 
   const variantItemById = new Map(variantItems.map((item) => [item.variantId, item]));
   // Every variant of a COLLECTIONS pool product is pickable, so a product

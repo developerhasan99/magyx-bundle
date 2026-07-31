@@ -59,8 +59,26 @@ export function TranslationsSection({
     () => secondaryLocales[0]?.locale ?? "",
   );
 
-  // Nothing to translate into — a single-language shop gets an explainer
-  // rather than an empty language picker with no options in it.
+  // An empty list means the lookup failed, not that the shop has no
+  // languages — saying "one language (English)" here would be a confident
+  // guess about something we don't know, and wrong on any non-English shop.
+  if (locales.length === 0) {
+    return (
+      <BlockStack gap="300">
+        <SectionHeading />
+        <Banner tone="warning">
+          <p>
+            Couldn't load this store's languages, so there's nothing to
+            translate into yet. Reload the page to try again — if it keeps
+            happening, reopen the app from Shopify so it can request the
+            permission it needs to read your language settings.
+          </p>
+        </Banner>
+      </BlockStack>
+    );
+  }
+
+  // Genuinely single-language: an explainer rather than an empty picker.
   if (secondaryLocales.length === 0) {
     return (
       <BlockStack gap="300">

@@ -314,6 +314,66 @@ export function buildTranslator(
   };
 }
 
+/** Picks a value out of a `{ locale: value }` map using the same chain as
+    buildTranslator, falling back to a caller-supplied default. Used for
+    Shopify-owned strings the merchant translates in Translate & Adapt rather
+    than in this app — product titles on pool items and gift cards. */
+export type LocaleValueResolver = (
+  byLocale: Record<string, string> | undefined,
+  fallback: string,
+) => string;
+
+export function buildLocaleValueResolver(
+  primaryLocale: string | null | undefined,
+  locale: string | null | undefined,
+): LocaleValueResolver {
+  const chain = [...localeChain(locale), ...localeChain(primaryLocale)];
+  return (byLocale, fallback) => {
+    if (byLocale) {
+      for (const tag of chain) {
+        const value = byLocale[tag];
+        if (typeof value === "string" && value) return value;
+      }
+    }
+    return fallback;
+  };
+}
+
+/* ---- Catalog product titles ----------------------------------------------
+   Unlike everything above, these strings belong to the merchant's catalog,
+   not to this app — they're translated in Shopify's Translate & Adapt and
+   read back through the Admin API. The composition rule lives here, beside
+   the locale helpers, so the server (which bakes per-locale titles into the
+   display metafield) and any future consumer share one definition. */
+
+/** A pool item's or gift's display title: the product name, suffixed with the
+    variant name when that variant is a real choice rather than Shopify's
+    synthetic single-variant placeholder. */
+export function composeProductTitle(productTitle: string, variantTitle: string): string {
+  const hasRealVariantTitle = variantTitle && variantTitle !== "Default Title";
+  return hasRealVariantTitle ? `${productTitle} — ${variantTitle}` : productTitle;
+}
+
+/**
+ * Recomposes a title from independently-translated product and variant parts,
+ * falling back to the untranslated part for whichever side has no translation
+ * (a merchant may well translate product names but leave "50ml" alone).
+ *
+ * Returns "" when neither part is translated, so callers can tell "same as
+ * the untranslated title" from "genuinely translated" and skip storing a
+ * duplicate — the metafield this ends up in is size-sensitive.
+ */
+export function localizedProductTitle(
+  parts: { productTitle: string; variantTitle: string },
+  translated: { product?: string; variant?: string },
+): string {
+  if (!translated.product && !translated.variant) return "";
+  return composeProductTitle(
+    translated.product || parts.productTitle,
+    translated.variant || parts.variantTitle,
+  );
+}
+
 export interface PackageTextResolver {
   /** A package's own translated `label`/`badgeText`, else the fallback. */
   field: (
