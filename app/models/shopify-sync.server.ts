@@ -1440,6 +1440,9 @@ interface SlotBuilderPublishInput {
     accentColor: string;
     showPrices: boolean;
     skipCart: boolean;
+    // Submit the moment the last slot is filled. Only meaningful alongside
+    // skipCart — the caller is responsible for forcing it false otherwise.
+    autoCheckout: boolean;
     itemSubtextTemplate: string;
     showSubtextOnGifts: boolean;
   };

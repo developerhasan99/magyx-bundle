@@ -298,6 +298,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       accentColor: bundle.accentColor,
       showPrices: bundle.showPrices,
       skipCart: bundle.skipCart,
+      autoCheckout: bundle.autoCheckout,
       itemSubtextTemplate: bundle.itemSubtextTemplate,
       showSubtextOnGifts: bundle.showSubtextOnGifts,
       freeShipping: bundle.freeShipping,
@@ -561,6 +562,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             accentColor: bundle.accentColor,
             showPrices: bundle.showPrices,
             skipCart: bundle.skipCart,
+            autoCheckout: bundle.skipCart && bundle.autoCheckout,
             itemSubtextTemplate: bundle.itemSubtextTemplate,
             showSubtextOnGifts: bundle.showSubtextOnGifts,
           },
@@ -636,6 +638,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
     accentColor: bundle?.accentColor ?? "#1a1a1a",
     showPrices: bundle?.showPrices ?? false,
     skipCart: bundle?.skipCart ?? false,
+    autoCheckout: bundle?.autoCheckout ?? false,
     itemSubtextTemplate: bundle?.itemSubtextTemplate ?? "",
     showSubtextOnGifts: bundle?.showSubtextOnGifts ?? true,
     freeShipping: bundle?.freeShipping ?? false,
@@ -771,6 +774,7 @@ export default function BundleBuilder() {
   const [accentColor, setAccentColor] = useState(initialForm.accentColor);
   const [showPrices, setShowPrices] = useState(initialForm.showPrices);
   const [skipCart, setSkipCart] = useState(initialForm.skipCart);
+  const [autoCheckout, setAutoCheckout] = useState(initialForm.autoCheckout);
   const [itemSubtextTemplate, setItemSubtextTemplate] = useState(
     initialForm.itemSubtextTemplate,
   );
@@ -852,6 +856,14 @@ export default function BundleBuilder() {
     },
     [type, activePackageIndex],
   );
+
+  // Turning skip cart off takes the widget's own button away, so auto
+  // checkout has nothing left to drive — clear it rather than leaving a
+  // checked-but-disabled box that would quietly switch back on later.
+  const onSkipCartChange = useCallback((value: boolean) => {
+    setSkipCart(value);
+    if (!value) setAutoCheckout(false);
+  }, []);
 
   const updatePackageAt = useCallback((index: number, patch: Partial<PackageState>) => {
     setPackages((current) =>
@@ -1005,8 +1017,8 @@ export default function BundleBuilder() {
     () =>
       JSON.stringify({
         title, type, status, pricingType, pricingValue, widgetStyle,
-        widgetHeading, accentColor, showPrices, skipCart, itemSubtextTemplate,
-        showSubtextOnGifts, freeShipping, translations, items,
+        widgetHeading, accentColor, showPrices, skipCart, autoCheckout,
+        itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations, items,
         packages: stripCollectionPoolItems(packages),
         collections, collectionPoolItems, poolSource,
         minItems, maxItems, tiers, qbTiers,
@@ -1017,8 +1029,9 @@ export default function BundleBuilder() {
       }),
     [
       initialForm, title, type, status, pricingType, pricingValue,
-      widgetStyle, widgetHeading, accentColor, showPrices, skipCart, itemSubtextTemplate,
-      showSubtextOnGifts, freeShipping, translations, items, packages, collections,
+      widgetStyle, widgetHeading, accentColor, showPrices, skipCart, autoCheckout,
+      itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations, items,
+      packages, collections,
       collectionPoolItems, poolSource,
       minItems, maxItems, tiers, qbTiers,
     ],
@@ -1042,6 +1055,7 @@ export default function BundleBuilder() {
       setAccentColor(form.accentColor);
       setShowPrices(form.showPrices);
       setSkipCart(form.skipCart);
+      setAutoCheckout(form.autoCheckout);
       setItemSubtextTemplate(form.itemSubtextTemplate);
       setShowSubtextOnGifts(form.showSubtextOnGifts);
       setFreeShipping(form.freeShipping);
@@ -1406,6 +1420,10 @@ export default function BundleBuilder() {
       accentColor,
       showPrices,
       skipCart,
+      // Enforced here as well as by the disabled checkbox: the widget's own
+      // button only exists when skipCart is on, so auto checkout has nothing
+      // to drive without it.
+      autoCheckout: skipCart && autoCheckout,
       itemSubtextTemplate,
       showSubtextOnGifts,
       freeShipping,
@@ -1502,8 +1520,9 @@ export default function BundleBuilder() {
     );
   }, [
     fetcher, title, description, type, status, pricingType, pricingValue,
-    widgetStyle, widgetHeading, accentColor, showPrices, skipCart, itemSubtextTemplate,
-    showSubtextOnGifts, freeShipping, translations, items, packages, minItems, maxItems,
+    widgetStyle, widgetHeading, accentColor, showPrices, skipCart, autoCheckout,
+    itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations, items, packages,
+    minItems, maxItems,
     tiers, poolSource, collections, qbTiers,
   ]);
 
@@ -1928,7 +1947,9 @@ export default function BundleBuilder() {
                     showSubtextOnGifts={showSubtextOnGifts}
                     setShowSubtextOnGifts={setShowSubtextOnGifts}
                     skipCart={skipCart}
-                    setSkipCart={setSkipCart}
+                    setSkipCart={onSkipCartChange}
+                    autoCheckout={autoCheckout}
+                    setAutoCheckout={setAutoCheckout}
                   />
                 </Card>
               )}

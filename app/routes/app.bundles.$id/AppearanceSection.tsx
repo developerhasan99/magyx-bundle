@@ -31,6 +31,8 @@ export function AppearanceSection({
   setShowSubtextOnGifts,
   skipCart = false,
   setSkipCart,
+  autoCheckout = false,
+  setAutoCheckout,
 }: {
   type: string;
   widgetStyle: string;
@@ -48,6 +50,8 @@ export function AppearanceSection({
   // SLOT_BUILDER only — FIXED bundles never pass these
   skipCart?: boolean;
   setSkipCart?: (value: boolean) => void;
+  autoCheckout?: boolean;
+  setAutoCheckout?: (value: boolean) => void;
 }) {
   const isSlotBuilder = type === "SLOT_BUILDER";
   // The layout picker only drives the "what's inside" widget — Build a box
@@ -151,6 +155,21 @@ export function AppearanceSection({
               onChange={setSkipCart}
               helpText="Off (default): if this product's page has your theme's own native Add to Cart button, adding to cart uses that button, so cart drawer and quick-add behave the same as they do everywhere else on your store. If it doesn't, the widget falls back to a button of its own that adds to cart and goes straight to checkout. On: this widget always shows its own button, which adds to cart and goes straight to checkout — skipping the cart entirely, in every case."
             />
+            {setAutoCheckout && (
+              <Checkbox
+                label="Go to checkout as soon as the last slot is filled"
+                checked={autoCheckout}
+                onChange={setAutoCheckout}
+                // Auto checkout drives the widget's own button, which only
+                // exists when Skip cart is on — see the widget's `ctaMode`.
+                disabled={!skipCart}
+                helpText={
+                  skipCart
+                    ? "The customer doesn't press anything: filling the final slot adds the bundle to the cart and sends them to checkout, exactly as if they had pressed the button themselves. If that add fails, the button reappears so they can retry."
+                    : "Requires “Skip cart and go straight to checkout” above."
+                }
+              />
+            )}
           </BlockStack>
         </>
       )}

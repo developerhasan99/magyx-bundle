@@ -988,6 +988,49 @@ import {
         modalSubtitleEl.textContent = t("modalSubtitle", { count: slots });
       }
 
+      /* ---- Automatic checkout -------------------------------------------
+         With the merchant's "go to checkout as soon as the last slot is
+         filled" setting on, the shopper never presses anything: filling the
+         final slot submits for them. It rides on the same button "checkout"
+         mode already renders, so it's only reachable when Skip Cart is on —
+         guarded again here in case an older metafield was baked with the two
+         out of step.
+
+         Armed by the transition to a full box, not by fullness itself:
+         update() runs on every change, including the re-render after a failed
+         submit, so without the latch a failure would resubmit forever. Emptying
+         a slot (or switching packs, which clears the picks) re-arms it. */
+      var autoCheckout = !!settings.autoCheckout && ctaMode === "checkout";
+      var autoCheckoutFired = false;
+      var autoCheckoutTimer = null;
+
+      // Long enough for the shopper to see their final pick register and the
+      // modal close (which itself runs on a 350ms timer) — submitting out
+      // from under an open modal reads as a glitch, not as their own action.
+      var AUTO_CHECKOUT_DELAY = 550;
+
+      function maybeAutoCheckout() {
+        if (!autoCheckout) return;
+        if (remaining() > 0) {
+          // Dropping below full cancels any submit still counting down, so a
+          // fill → remove → fill sequence can't leave two timers pending and
+          // add the bundle to the cart twice.
+          clearTimeout(autoCheckoutTimer);
+          autoCheckoutTimer = null;
+          autoCheckoutFired = false;
+          return;
+        }
+        if (autoCheckoutFired) return;
+        autoCheckoutFired = true;
+        autoCheckoutTimer = setTimeout(function () {
+          autoCheckoutTimer = null;
+          // Re-checked on the way out: the shopper has had the delay to
+          // remove something, and submitting a box they've since emptied
+          // would be worse than doing nothing.
+          if (remaining() === 0) submitToCheckout();
+        }, AUTO_CHECKOUT_DELAY);
+      }
+
       function update() {
         renderPrice();
         renderSlots();
@@ -996,6 +1039,7 @@ import {
         renderNativeCta();
         renderModalHeader();
         errorEl.hidden = true;
+        maybeAutoCheckout();
       }
 
       function openModal() {
@@ -1103,33 +1147,53 @@ import {
             showIncompleteError();
             return;
           }
-          var pkg = activePackage();
-          var originalLabel = ctaBtn.textContent;
-          ctaBtn.disabled = true;
-          ctaBtn.textContent = t("ctaAdding");
-          fetch("/cart/add.js", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              items: [
-                {
-                  id: parseInt(numericId(pkg.variantId), 10),
-                  quantity: 1,
-                  properties: propertiesObject(),
-                },
-              ],
-            }),
-          })
-            .then(function (response) {
-              if (!response.ok) throw new Error("add failed");
-              window.location.href = "/checkout";
-            })
-            .catch(function () {
-              ctaBtn.disabled = false;
-              ctaBtn.textContent = originalLabel;
-              alert(t("errorAddFailed"));
-            });
+          submitToCheckout();
         });
+      }
+
+      // The whole of "checkout" mode's add-to-cart: stamp the picks onto the
+      // line, then hand off to /checkout. Shared by the button and — when the
+      // merchant enabled it — the automatic submit below, so both paths give
+      // identical feedback and identical recovery on failure.
+      var checkoutInFlight = false;
+
+      function submitToCheckout() {
+        // Two callers now (the button and the timer) and a live /cart/add.js
+        // in between — disabling the button isn't enough on its own, since
+        // the automatic path never touches it.
+        if (checkoutInFlight) return;
+        checkoutInFlight = true;
+        var pkg = activePackage();
+        var originalLabel = ctaBtn.textContent;
+        ctaBtn.disabled = true;
+        ctaBtn.textContent = t("ctaAdding");
+        fetch("/cart/add.js", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: [
+              {
+                id: parseInt(numericId(pkg.variantId), 10),
+                quantity: 1,
+                properties: propertiesObject(),
+              },
+            ],
+          }),
+        })
+          .then(function (response) {
+            if (!response.ok) throw new Error("add failed");
+            window.location.href = "/checkout";
+          })
+          .catch(function () {
+            // Puts the shopper back in control: the button returns to its
+            // normal label so they can retry by hand. autoCheckoutFired
+            // stays set, so the automatic path won't immediately retry on
+            // its own and trap them in a loop.
+            checkoutInFlight = false;
+            ctaBtn.disabled = false;
+            ctaBtn.textContent = originalLabel;
+            alert(t("errorAddFailed"));
+          });
       }
 
       renderPacks();

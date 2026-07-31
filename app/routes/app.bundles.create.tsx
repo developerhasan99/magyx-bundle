@@ -64,6 +64,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     accentColor: "#1a1a1a",
     showPrices: false,
     skipCart: false,
+    autoCheckout: false,
     itemSubtextTemplate: "",
     showSubtextOnGifts: true,
     freeShipping: false,

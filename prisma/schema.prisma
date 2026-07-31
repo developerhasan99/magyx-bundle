@@ -33,6 +33,11 @@ model Bundle {
   // to checkout after adding — the widget renders its own button instead of
   // deferring to the theme's native add-to-cart form when this is on.
   skipCart        Boolean      @default(false)
+  // SLOT_BUILDER only: don't wait for the customer to press that button —
+  // the moment the last slot is filled, add to cart and go to checkout as if
+  // they had. Meaningless without skipCart (there'd be no button of ours to
+  // press), so the editor disables it and the publish step forces it false.
+  autoCheckout    Boolean      @default(false)
   // Plain text + {{sku}}/{{vendor}}/{{type}}/{{barcode}}/{{weight}}/{{metafield:ns.key}}
   // placeholders, resolved per-item and rendered under each product's title
   itemSubtextTemplate String   @default("")
