@@ -1637,14 +1637,20 @@ export interface ShopLocale {
   locale: string;
   name: string;
   primary: boolean;
+  /** Live on the storefront. Unpublished languages are still offered in the
+      editor so copy can be prepared before the language goes live. */
+  published: boolean;
 }
 
 /**
- * The shop's published storefront languages, primary first. Drives the
- * language switcher in the bundle editor's translations card, and tells the
- * storefront widget which bucket to fall back to. Unpublished locales are
- * dropped: a merchant can't show them to shoppers yet, so offering fields
- * for them is just clutter.
+ * Every storefront language the shop has set up — published or not — with the
+ * primary first, then the rest of the published ones, then unpublished.
+ * Drives the language switcher in the bundle editor's translations card, and
+ * tells the storefront widget which bucket to fall back to.
+ *
+ * Unpublished locales are included so a merchant can prepare copy before
+ * flipping a language live in Shopify; callers that write storefront payloads
+ * are the ones that filter on `published`.
  *
  * Needs the `read_locales` access scope. Returns [] when the lookup fails —
  * never a made-up default. An earlier version fell back to a lone English
@@ -1656,7 +1662,7 @@ export async function fetchShopLocales(admin: AdminApiContext): Promise<ShopLoca
     const response = await admin.graphql(
       `#graphql
       query magyxShopLocales {
-        shopLocales(published: true) { locale name primary }
+        shopLocales { locale name primary published }
       }`,
     );
     // The SDK's response body type only models `data`, but GraphQL puts
@@ -1674,7 +1680,12 @@ export async function fetchShopLocales(admin: AdminApiContext): Promise<ShopLoca
       return [];
     }
     const locales: ShopLocale[] = json.data?.shopLocales ?? [];
-    return [...locales].sort((a, b) => Number(b.primary) - Number(a.primary));
+    return [...locales].sort(
+      (a, b) =>
+        Number(b.primary) - Number(a.primary) ||
+        Number(b.published) - Number(a.published) ||
+        a.name.localeCompare(b.name),
+    );
   } catch (error) {
     console.warn("Magyx Bundle: could not load shop locales", error);
     return [];
@@ -1974,8 +1985,13 @@ export async function publishSlotBuilderBundleProduct(
        untranslated title already is that language. Localized after the
        per-package fetches above so it's one batched lookup for the whole
        bundle instead of one per package. */
+    // Published only, and never the primary: an unpublished language can't be
+    // reached by a shopper, and baking titles for it would grow the metafield
+    // for nobody. (Widget copy the merchant typed is baked for every locale
+    // regardless — it's a few dozen short strings, and it means publishing a
+    // language in Shopify works immediately without a republish here.)
     const secondaryLocales = (await fetchShopLocales(admin))
-      .filter((l) => !l.primary)
+      .filter((l) => l.published && !l.primary)
       .map((l) => l.locale);
     if (secondaryLocales.length > 0) {
       await attachPoolItemTitlesByLocale(

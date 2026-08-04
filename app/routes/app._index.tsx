@@ -20,6 +20,7 @@ import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import {
   deleteBundle,
+  duplicateBundle,
   getBundles,
   setBundleStatus,
   type BundleStatus,
@@ -61,6 +62,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "delete") {
     for (const id of ids) await deleteBundle(session.shop, id);
+  } else if (intent === "duplicate") {
+    // Sequential, not Promise.all: each copy is a multi-table write and a
+    // handful of bundles isn't worth risking write contention over.
+    for (const id of ids) await duplicateBundle(session.shop, id);
   } else if (intent === "activate" || intent === "deactivate") {
     const status: BundleStatus = intent === "activate" ? "ACTIVE" : "DRAFT";
     for (const id of ids) await setBundleStatus(session.shop, id, status);
@@ -146,6 +151,7 @@ export default function Dashboard() {
       resourceState.clearSelection();
       const messages: Record<string, string> = {
         activate: "Bundles activated",
+        duplicate: "Bundles duplicated as drafts",
         deactivate: "Bundles deactivated",
         delete: "Bundles deleted",
       };
@@ -157,6 +163,7 @@ export default function Dashboard() {
   const promotedBulkActions = [
     { content: "Activate", onAction: () => runBulk("activate") },
     { content: "Deactivate", onAction: () => runBulk("deactivate") },
+    { content: "Duplicate", onAction: () => runBulk("duplicate") },
     {
       content: "Delete",
       destructive: true,

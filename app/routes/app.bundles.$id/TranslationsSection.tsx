@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   BlockStack,
   Banner,
@@ -24,18 +24,24 @@ export interface ShopLocaleOption {
   locale: string;
   name: string;
   primary: boolean;
+  /** Unpublished languages are still listed, so copy can be written before
+      the language is switched on in Shopify. */
+  published: boolean;
 }
 
 /**
- * SLOT_BUILDER only: per-language overrides for every string the storefront
- * widget shows, plus each package's own label/badge/filter-chip copy.
+ * SLOT_BUILDER only: per-language copy for every string the storefront widget
+ * shows, plus each package's own label/badge/filter-chip text.
  *
- * The merchant's primary language isn't editable here — that copy already
- * lives in the fields it belongs to (Appearance's heading, each package's
- * label), and duplicating it would give two places to change one string.
- * This card only handles the *additional* languages, and every field left
- * blank falls back: shopper's language → primary language → the widget's
- * built-in English.
+ * Every language the shop has is listed, including the primary one and any
+ * that aren't published yet. The primary matters because the widget's own
+ * built-in copy is English: a shop whose default language is Swedish has no
+ * other place to write Swedish chrome, and would otherwise be stuck with
+ * English no matter what it did. Unpublished languages are listed so copy can
+ * be prepared before the language goes live.
+ *
+ * Resolution at render time: shopper's language → primary language → the
+ * widget's built-in English. Every field left blank falls through.
  */
 export function TranslationsSection({
   locales,
@@ -54,9 +60,10 @@ export function TranslationsSection({
   updatePackage: (index: number, patch: Partial<PackageState>) => void;
 }) {
   const primaryLocale = locales.find((l) => l.primary);
-  const secondaryLocales = useMemo(() => locales.filter((l) => !l.primary), [locales]);
+  // Starts on the primary language. On a single-language shop that's the only
+  // option, and it's the one whose copy every shopper sees by default.
   const [activeLocale, setActiveLocale] = useState(
-    () => secondaryLocales[0]?.locale ?? "",
+    () => primaryLocale?.locale ?? locales[0]?.locale ?? "",
   );
 
   // An empty list means the lookup failed, not that the shop has no
@@ -78,28 +85,23 @@ export function TranslationsSection({
     );
   }
 
-  // Genuinely single-language: an explainer rather than an empty picker.
-  if (secondaryLocales.length === 0) {
-    return (
-      <BlockStack gap="300">
-        <SectionHeading />
-        <Banner tone="info">
-          <p>
-            This store publishes one language
-            {primaryLocale ? ` (${primaryLocale.name})` : ""}. Add more in Shopify
-            Settings → Languages and they'll show up here to translate.
-          </p>
-        </Banner>
-      </BlockStack>
-    );
-  }
-
   // A locale that disappeared from the shop between renders would leave the
   // Select with no matching option — fall back to the first available one.
-  const selectedLocale = secondaryLocales.some((l) => l.locale === activeLocale)
+  const selectedLocale = locales.some((l) => l.locale === activeLocale)
     ? activeLocale
-    : secondaryLocales[0].locale;
+    : locales[0].locale;
   const localeStrings = translations[selectedLocale] ?? {};
+
+  /* Editing the shop's own default language. The widget's built-in copy is
+     English, so without this a Swedish-only shop could never get Swedish
+     chrome — there'd be nowhere to type it, and the widget would fall through
+     to its English defaults.
+
+     The heading and the package label/badge/chip fields are hidden in this
+     mode on purpose: for the default language those already live in the
+     Storefront and General sections, and offering them twice would give one
+     string two homes that could disagree. */
+  const isPrimarySelected = selectedLocale === primaryLocale?.locale;
 
   const setString = (key: string, value: string) => {
     setTranslations({
@@ -145,8 +147,8 @@ export function TranslationsSection({
   // meant to answer "have I finished this language?", so blanks don't count.
   const filledCount =
     SLOT_BUILDER_TEXT_FIELDS.filter((f) => localeStrings[f.key]?.trim()).length +
-    (localeStrings[HEADING_TEXT_KEY]?.trim() ? 1 : 0);
-  const totalCount = SLOT_BUILDER_TEXT_FIELDS.length + 1;
+    (!isPrimarySelected && localeStrings[HEADING_TEXT_KEY]?.trim() ? 1 : 0);
+  const totalCount = SLOT_BUILDER_TEXT_FIELDS.length + (isPrimarySelected ? 0 : 1);
 
   return (
     <BlockStack gap="500">
@@ -156,16 +158,25 @@ export function TranslationsSection({
         <div style={{ minWidth: 240 }}>
           <Select
             label="Language"
-            options={secondaryLocales.map((l) => ({
-              label: l.name,
+            options={locales.map((l) => ({
+              // Unpublished languages are offered so copy can be written
+              // before the language goes live in Shopify — labelled so it's
+              // clear no shopper is seeing it yet.
+              label: l.primary
+                ? `${l.name} (default)`
+                : l.published
+                  ? l.name
+                  : `${l.name} — not published`,
               value: l.locale,
             }))}
             value={selectedLocale}
             onChange={setActiveLocale}
             helpText={
-              primaryLocale
-                ? `Anything left blank falls back to ${primaryLocale.name}.`
-                : "Anything left blank falls back to your default language."
+              isPrimarySelected
+                ? "Your store's default language. This copy is what shoppers see unless another language below overrides it — leave a field blank to use the app's built-in English."
+                : primaryLocale
+                  ? `Anything left blank falls back to ${primaryLocale.name}.`
+                  : "Anything left blank falls back to your default language."
             }
           />
         </div>
@@ -178,6 +189,7 @@ export function TranslationsSection({
 
       <Divider />
 
+      {!isPrimarySelected && (
       <BlockStack gap="300">
         <Text as="h3" variant="headingSm">
           Heading
@@ -192,12 +204,13 @@ export function TranslationsSection({
           helpText={
             widgetHeading
               ? undefined
-              : "Set a heading in Appearance before translating it."
+              : "Set a heading in Storefront before translating it."
           }
         />
       </BlockStack>
+      )}
 
-      {packages.length > 0 && (
+      {!isPrimarySelected && packages.length > 0 && (
         <>
           <Divider />
           <BlockStack gap="300">

@@ -1,7 +1,8 @@
 import prisma from "../db.server";
-import type {
-  PackageTranslations,
-  SlotBuilderTranslations,
+import {
+  parseTranslations,
+  type PackageTranslations,
+  type SlotBuilderTranslations,
 } from "../utils/slot-builder-text";
 
 export type BundleType = "FIXED" | "SLOT_BUILDER" | "MIX_MATCH" | "QUANTITY_BREAKS";
@@ -348,6 +349,122 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
       },
       include: { items: true, rule: true, ...PACKAGES_INCLUDE, ...TIERS_INCLUDE },
     });
+  });
+}
+
+/**
+ * Deep-copies a bundle — items, packages (with their own items), quantity
+ * break tiers, and the mix & match rule — and returns the new one.
+ *
+ * Two things are deliberately NOT carried over:
+ *
+ * - `shopifyProductId`, and each package's `shopifyVariantId`. These point at
+ *   the Shopify product the original published. A copy that kept them would
+ *   overwrite the original's product and variants the first time it was set
+ *   Active — two bundles writing to one listing, with the second silently
+ *   destroying the first. The duplicate publishes its own product instead.
+ *   (`createBundle` doesn't accept either field, which is what enforces this;
+ *   the mapping below simply never has the chance to pass them.)
+ * - `status`. A duplicate always starts as a DRAFT, so copying an active
+ *   bundle can't put an unreviewed second listing in front of customers.
+ */
+export async function duplicateBundle(shop: string, id: string) {
+  const source = await prisma.bundle.findFirst({
+    where: { id, shop },
+    include: {
+      items: { orderBy: { position: "asc" } },
+      rule: true,
+      ...PACKAGES_INCLUDE,
+      ...TIERS_INCLUDE,
+    },
+  });
+  if (!source) throw new Response("Bundle not found", { status: 404 });
+
+  // Bundles created from the type picker start untitled; suffixing that would
+  // produce a bundle called " (copy)" rather than a blank one the editor
+  // still prompts the merchant to name.
+  const title = source.title.trim() ? `${source.title} (copy)` : "";
+
+  return createBundle(shop, {
+    title,
+    description: source.description ?? undefined,
+    type: source.type as BundleType,
+    status: "DRAFT",
+    pricingType: source.pricingType as PricingType,
+    pricingValue: source.pricingValue,
+    widgetStyle: source.widgetStyle as WidgetStyle,
+    widgetHeading: source.widgetHeading,
+    accentColor: source.accentColor,
+    showPrices: source.showPrices,
+    skipCart: source.skipCart,
+    autoCheckout: source.autoCheckout,
+    poolMode: source.poolMode,
+    itemSubtextTemplate: source.itemSubtextTemplate,
+    showSubtextOnGifts: source.showSubtextOnGifts,
+    freeShipping: source.freeShipping,
+    quantityBreakScope: source.quantityBreakScope,
+    translations: parseTranslations<SlotBuilderTranslations>(source.translations, {}),
+    items: source.items.map((item, position) => ({
+      productId: item.productId,
+      variantId: item.variantId,
+      productTitle: item.productTitle,
+      productImageUrl: item.productImageUrl,
+      quantity: item.quantity,
+      isGift: item.isGift,
+      position,
+    })),
+    // No `id` on the copies — these have to be created rather than upserted
+    // onto the source's rows.
+    packages: source.packages.map((pkg, position) => ({
+      label: pkg.label,
+      badgeText: pkg.badgeText,
+      badgeTone: pkg.badgeTone,
+      position,
+      pricingType: pkg.pricingType as PricingType,
+      pricingValue: pkg.pricingValue,
+      freeShipping: pkg.freeShipping,
+      poolSource: pkg.poolSource,
+      slotCount: pkg.slotCount,
+      collectionIds: JSON.parse(pkg.collectionIds) as string[],
+      variantFilter: pkg.variantFilter,
+      tagFilters: JSON.parse(pkg.tagFilters) as { label: string; tag: string }[],
+      translations: parseTranslations<PackageTranslations>(pkg.translations, {}),
+      items: pkg.items.map((item, itemPosition) => ({
+        productId: item.productId,
+        variantId: item.variantId,
+        productTitle: item.productTitle,
+        productImageUrl: item.productImageUrl,
+        quantity: item.quantity,
+        isGift: item.isGift,
+        position: itemPosition,
+      })),
+    })),
+    tiers: source.tiers.map((tier, position) => ({
+      quantity: tier.quantity,
+      label: tier.label,
+      badgeText: tier.badgeText,
+      badgeTone: tier.badgeTone,
+      pricingType: tier.pricingType as PricingType,
+      pricingValue: tier.pricingValue,
+      isDefault: tier.isDefault,
+      position,
+      items: tier.items.map((item, itemPosition) => ({
+        productId: item.productId,
+        variantId: item.variantId,
+        productTitle: item.productTitle,
+        productImageUrl: item.productImageUrl,
+        quantity: item.quantity,
+        position: itemPosition,
+      })),
+    })),
+    rule: source.rule
+      ? {
+          minItems: source.rule.minItems,
+          maxItems: source.rule.maxItems,
+          discountTiers: JSON.parse(source.rule.discountTiers) as DiscountTier[],
+          collectionIds: JSON.parse(source.rule.collectionIds) as string[],
+        }
+      : null,
   });
 }
 

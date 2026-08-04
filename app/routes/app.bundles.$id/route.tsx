@@ -24,6 +24,7 @@ import { authenticate } from "../../shopify.server";
 import {
   createBundle,
   deleteBundle,
+  duplicateBundle,
   getBundle,
   updateBundle,
   type BundleInput,
@@ -398,6 +399,14 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect("/app");
   }
 
+  // The copy is always a DRAFT and owns no Shopify product yet (see
+  // duplicateBundle), so there is nothing to publish and no reason to
+  // resync the checkout metafield — only ACTIVE bundles appear in it.
+  if (intent === "duplicate" && params.id !== "new") {
+    const copy = await duplicateBundle(session.shop, params.id!);
+    return redirect(`/app/bundles/${copy.id}`);
+  }
+
   const payload = JSON.parse(String(formData.get("payload"))) as BundleInput & {
     rule?: { minItems: number; maxItems: number | null; discountTiers: { quantity: number; discount: number }[]; collectionIds: string[] } | null;
   };
@@ -754,6 +763,7 @@ export default function BundleBuilder() {
     useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const deleteFetcher = useFetcher<typeof action>();
+  const duplicateFetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
   const isNew = !bundle;
@@ -1733,6 +1743,15 @@ export default function BundleBuilder() {
         isNew
           ? []
           : [
+              {
+                content: "Duplicate",
+                loading: duplicateFetcher.state !== "idle",
+                // Unsaved edits stay behind: the copy is made from what's in
+                // the database, so the save bar's warning about leaving is
+                // the right guard rather than silently copying stale values.
+                onAction: () =>
+                  duplicateFetcher.submit({ intent: "duplicate" }, { method: "POST" }),
+              },
               {
                 content: "Delete",
                 destructive: true,
