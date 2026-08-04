@@ -1,0 +1,95 @@
+{%- comment -%}
+  The one block a merchant adds to their product page. Replaces the three
+  separate blocks this app used to ship (Build a Box, Fixed Bundle, Quantity
+  Breaks) — they all lived in the same spot on the same template, and picking
+  the wrong one for the bundle you'd built was the easiest mistake to make.
+  Which widget a product gets is decided here instead, from the product's own
+  data. Mix & Match keeps its own block: it's placed deliberately, configured
+  with a pasted Bundle ID, and isn't a product-page hero widget.
+
+  Precedence, and why:
+  1. Build a box, 2. Fixed — these two can never collide. Each publishes its
+     own parent product, so a product carries at most one of the two
+     metafields. The order between them is arbitrary and never exercised.
+  3. Quantity breaks — only when neither bundle metafield is present. A
+     Quantity Breaks bundle scoped to "All products" DOES match bundle parent
+     products, so without this gate a bundle page would show both widgets.
+     Skipping it here also saves the app-proxy round trip below on every
+     bundle page.
+
+  Nothing is editable from the theme editor: every option lives in the Magyx
+  Bundle admin, which is why there are no schema settings. The block
+  self-hides on products that have no bundle at all.
+
+  The schema's "javascript" key is a tiny loader — Shopify's app-block JS size
+  check (10KB) only scans that declared file, so each widget's real
+  implementation is loaded at runtime from the `data-magyx-impl-src` the
+  matching branch below emits, and isn't subject to that check.
+{%- endcomment -%}
+
+{%- assign slot_data = product.metafields.magyx_bundle.slot_builder.value -%}
+{%- assign fixed_data = product.metafields.magyx_bundle.components.value -%}
+
+<div class="magyx-bundle-widget" {{ block.shopify_attributes }}>
+  {%- if slot_data.bundleId != blank -%}
+    {%- comment -%}
+      Pool contents aren't in the metafield (a collection-scoped pool can
+      change without a republish) — the widget's JS fetches those live from
+      the app proxy instead.
+    {%- endcomment -%}
+    <div
+      class="magyx-slot-builder"
+      style="--bc-accent: {{ slot_data.settings.accentColor | default: '#1a1a1a' }};"
+      data-money-format="{{ shop.money_format | escape }}"
+      data-locale="{{ request.locale.iso_code | escape }}"
+      data-magyx-impl-src="{{ 'magyx-bundle-slot-builder-impl.js' | asset_url }}"
+    >
+      <script type="application/json" data-magyx-slot-builder-data>
+        {{ slot_data | json }}
+      </script>
+      <div class="magyx-slot-builder__state"></div>
+    </div>
+
+  {%- elsif fixed_data != blank -%}
+    {%- comment -%}
+      Assigned first: `render` parameters take a value, not a filtered
+      expression. `default_variant_id` is passed rather than read off the
+      global `product` inside the snippet — `render` gives the snippet an
+      isolated scope, so being explicit about what it depends on beats
+      relying on what happens to be global at the call site.
+    {%- endcomment -%}
+    {%- assign fixed_impl_src = 'magyx-bundle-fixed.js' | asset_url -%}
+    {%- render 'magyx-bundle-contents',
+      bundle_data: fixed_data,
+      impl_src: fixed_impl_src,
+      default_variant_id: product.variants.first.id
+    -%}
+
+  {%- else -%}
+    {%- comment -%}
+      The only widget with no server-side gate: whether a Quantity Breaks
+      bundle covers this product depends on scope (ALL / PRODUCTS /
+      COLLECTIONS), and collection membership needs a live lookup. So the
+      container always renders on non-bundle products and its JS asks the app
+      proxy, self-hiding when nothing applies.
+    {%- endcomment -%}
+    <div
+      class="magyx-quantity-breaks"
+      data-product-id="{{ product.id }}"
+      data-money-format="{{ shop.money_format | escape }}"
+      data-magyx-impl-src="{{ 'magyx-bundle-quantity-breaks.js' | asset_url }}"
+    >
+      <div class="magyx-quantity-breaks__state"></div>
+    </div>
+  {%- endif -%}
+</div>
+
+{% schema %}
+{
+  "name": "Magyx Bundle",
+  "target": "section",
+  "stylesheet": "magyx-bundle.css",
+  "javascript": "magyx-bundle-loader.js",
+  "settings": []
+}
+{% endschema %}

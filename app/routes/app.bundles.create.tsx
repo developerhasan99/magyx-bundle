@@ -65,6 +65,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     showPrices: false,
     skipCart: false,
     autoCheckout: false,
+    poolMode: "PER_PACKAGE",
     itemSubtextTemplate: "",
     showSubtextOnGifts: true,
     freeShipping: false,

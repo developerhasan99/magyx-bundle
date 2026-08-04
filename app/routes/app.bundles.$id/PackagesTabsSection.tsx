@@ -3,7 +3,43 @@ import { DeleteIcon } from "@shopify/polaris-icons";
 import { PackageTab } from "./PackageTab";
 import { BADGE_TONE_OPTIONS, type PackageState } from "./types";
 
-// FIXED bundles only: package tabs + label/badge fields for the active one.
+/**
+ * Just the row of package tabs. Pricing, products and gifts are all edited
+ * per package but live in their own editor sections, so each of those repeats
+ * this strip — without it the merchant can't tell which package they're
+ * changing, or switch without navigating back to Packages.
+ *
+ * Renders nothing until there's more than one package to switch between.
+ */
+export function PackageTabsStrip({
+  packages,
+  activePackageIndex,
+  setActivePackageIndex,
+}: {
+  packages: PackageState[];
+  activePackageIndex: number;
+  setActivePackageIndex: (index: number) => void;
+}) {
+  if (packages.length <= 1) return null;
+
+  return (
+    <InlineStack gap="200" wrap>
+      {packages.map((pkg, index) => (
+        <PackageTab
+          key={pkg.id ?? pkg.tempKey}
+          label={pkg.label}
+          badgeText={pkg.badgeText}
+          badgeTone={pkg.badgeTone}
+          selected={index === activePackageIndex}
+          onSelect={() => setActivePackageIndex(index)}
+        />
+      ))}
+    </InlineStack>
+  );
+}
+
+// The tab strip plus the active package's own label/badge fields — the
+// Packages section's own content, as opposed to the bare strip above.
 // Renders nothing until there's more than one package to switch between.
 export function PackagesTabsSection({
   packages,
@@ -22,18 +58,11 @@ export function PackagesTabsSection({
 
   return (
     <>
-      <InlineStack gap="200" wrap>
-        {packages.map((pkg, index) => (
-          <PackageTab
-            key={pkg.id ?? pkg.tempKey}
-            label={pkg.label}
-            badgeText={pkg.badgeText}
-            badgeTone={pkg.badgeTone}
-            selected={index === activePackageIndex}
-            onSelect={() => setActivePackageIndex(index)}
-          />
-        ))}
-      </InlineStack>
+      <PackageTabsStrip
+        packages={packages}
+        activePackageIndex={activePackageIndex}
+        setActivePackageIndex={setActivePackageIndex}
+      />
       <InlineStack gap="300" wrap blockAlign="end">
         <div style={{ minWidth: 200, flex: 1 }}>
           <TextField

@@ -152,6 +152,24 @@ export function defaultPackageState(): PackageState {
   };
 }
 
+// SLOT_BUILDER only: whether every package draws from one shared product
+// pool or each defines its own. Authoring-only — GLOBAL is stored by copying
+// the same pool onto every package, so nothing downstream sees a difference.
+export const POOL_MODE_OPTIONS = [
+  {
+    label: "One pool for all packages",
+    value: "GLOBAL",
+    helpText:
+      "Every package offers the same products. Slot count, price, and free gifts still differ per package.",
+  },
+  {
+    label: "A pool per package",
+    value: "PER_PACKAGE",
+    helpText:
+      "Each package offers its own products — e.g. a different range for 30ml than for 100ml.",
+  },
+] as const;
+
 // MIX_MATCH/SLOT_BUILDER: where a package's product pool comes from.
 export const POOL_SOURCE_OPTIONS = [
   {

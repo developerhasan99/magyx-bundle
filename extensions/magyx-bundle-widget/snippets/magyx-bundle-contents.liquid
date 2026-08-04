@@ -1,0 +1,129 @@
+{%- comment -%}
+  The "what's inside" list for a FIXED bundle's parent product. Lifted out of
+  the old standalone Fixed Bundle block when the three product-page widgets
+  were merged into one — it's the bulk of that block's markup, and inlining it
+  would have buried the combined block's actual job (deciding which widget a
+  product gets).
+
+  Params: bundle_data         the magyx_bundle.components metafield value
+          impl_src            asset URL the shared loader pulls
+                              magyx-bundle-fixed.js from
+          default_variant_id  the product's first variant, used only by the
+                              legacy single-package shape below. Passed in
+                              rather than read from the global `product`
+                              because `render` isolates this snippet's scope.
+
+  Renders nothing when the metafield holds no items, so the caller doesn't
+  have to inspect its shape.
+{%- endcomment -%}
+
+{%- comment -%}
+  Three possible shapes, oldest to newest:
+  - a bare array of items (bundles published before per-bundle appearance
+    settings existed)
+  - { settings, items } — a single-package FIXED bundle (today's default)
+  - { settings, packages: [{ variantId, label, badgeText, badgeTone,
+    freeShipping, items }, ...] } — a bundle with more than one package
+{%- endcomment -%}
+{%- if bundle_data.packages and bundle_data.packages.size > 0 -%}
+  {%- assign is_multi_pack = true -%}
+  {%- assign packages = bundle_data.packages -%}
+  {%- assign settings = bundle_data.settings -%}
+{%- elsif bundle_data.items -%}
+  {%- assign is_multi_pack = false -%}
+  {%- assign single_items = bundle_data.items -%}
+  {%- assign settings = bundle_data.settings -%}
+{%- else -%}
+  {%- assign is_multi_pack = false -%}
+  {%- assign single_items = bundle_data -%}
+  {%- assign settings = blank -%}
+{%- endif -%}
+
+{%- assign has_content = false -%}
+{%- if is_multi_pack and packages.size > 0 -%}
+  {%- assign has_content = true -%}
+{%- elsif single_items and single_items.size > 0 -%}
+  {%- assign has_content = true -%}
+{%- endif -%}
+
+{%- if has_content -%}
+  {%- assign style = settings.style | default: "numbered" -%}
+  {%- assign heading = settings.heading -%}
+  {%- assign accent = settings.accentColor | default: "#1a1a1a" -%}
+  {%- assign show_prices = settings.showPrices -%}
+  <div
+    class="magyx-bundle-contents magyx-bundle-contents--{{ style }}"
+    style="--bc-accent: {{ accent }};"
+    data-magyx-impl-src="{{ impl_src }}"
+  >
+    {%- comment -%}
+      Consumed by magyx-bundle-fixed.js to stamp "Item N" properties onto the
+      bundle's own cart line at add-to-cart time (so they show up on the
+      parent bundle line rather than its expanded children), and — when
+      there's more than one package — to switch the active variant/panel
+      when a shopper taps a package tab.
+    {%- endcomment -%}
+    <script type="application/json" data-magyx-bundle-data>
+      {
+        "packages": [
+          {%- if is_multi_pack -%}
+            {%- for pkg in packages -%}
+              {
+                "variantId": {{ pkg.variantId | json }},
+                "items": [
+                  {%- for item in pkg.items -%}
+                    { "title": {{ item.title | json }}, "quantity": {{ item.quantity | default: 1 }}, "isGift": {{ item.isGift | default: false }} }{%- unless forloop.last -%},{%- endunless -%}
+                  {%- endfor -%}
+                ]
+              }{%- unless forloop.last -%},{%- endunless -%}
+            {%- endfor -%}
+          {%- else -%}
+            {
+              "variantId": {{ default_variant_id | json }},
+              "items": [
+                {%- for item in single_items -%}
+                  { "title": {{ item.title | json }}, "quantity": {{ item.quantity | default: 1 }}, "isGift": {{ item.isGift | default: false }} }{%- unless forloop.last -%},{%- endunless -%}
+                {%- endfor -%}
+              ]
+            }
+          {%- endif -%}
+        ]
+      }
+    </script>
+    {%- if heading != blank -%}
+      <p class="magyx-bundle-contents__heading">{{ heading }}</p>
+    {%- endif -%}
+
+    {%- if is_multi_pack and packages.size > 1 -%}
+      <div class="magyx-bundle-contents__packs" role="tablist">
+        {%- for pkg in packages -%}
+          <button
+            type="button"
+            class="magyx-bundle-contents__pack-tab{% if forloop.first %} magyx-bundle-contents__pack-tab--active{% endif %}"
+            data-magyx-pack-tab="{{ forloop.index0 }}"
+            aria-pressed="{{ forloop.first }}"
+          >
+            <span class="magyx-bundle-contents__pack-tab-label">{{ pkg.label }}</span>
+            {%- if pkg.badgeText != blank -%}
+              <span class="magyx-bundle-contents__pack-badge magyx-bundle-contents__pack-badge--{{ pkg.badgeTone | default: 'info' }}">{{ pkg.badgeText }}</span>
+            {%- endif -%}
+          </button>
+        {%- endfor -%}
+      </div>
+    {%- endif -%}
+
+    {%- if is_multi_pack -%}
+      {%- for pkg in packages -%}
+        <div
+          class="magyx-bundle-contents__pack-panel"
+          data-magyx-pack-panel="{{ forloop.index0 }}"
+          {% unless forloop.first %}hidden{% endunless %}
+        >
+          {%- render 'magyx-bundle-pack-panel', items: pkg.items, style: style, show_prices: show_prices, free_shipping: pkg.freeShipping -%}
+        </div>
+      {%- endfor -%}
+    {%- else -%}
+      {%- render 'magyx-bundle-pack-panel', items: single_items, style: style, show_prices: show_prices, free_shipping: settings.freeShipping -%}
+    {%- endif -%}
+  </div>
+{%- endif -%}

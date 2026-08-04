@@ -104,6 +104,10 @@ export interface BundleInput {
   // SLOT_BUILDER only: submit as soon as the last slot is filled, without
   // waiting for the customer to press the button. Requires skipCart.
   autoCheckout: boolean;
+  // SLOT_BUILDER only: GLOBAL | PER_PACKAGE. Authoring-only — GLOBAL means
+  // the caller has already copied one pool onto every package, so the rows
+  // written here look identical either way.
+  poolMode: string;
   itemSubtextTemplate: string;
   showSubtextOnGifts: boolean;
   // FIXED bundles: waives shipping at checkout when this bundle is bought
@@ -228,6 +232,7 @@ export async function createBundle(shop: string, input: BundleInput) {
       showPrices: input.showPrices,
       skipCart: input.skipCart,
       autoCheckout: input.autoCheckout,
+      poolMode: input.poolMode,
       itemSubtextTemplate: input.itemSubtextTemplate,
       showSubtextOnGifts: input.showSubtextOnGifts,
       freeShipping: input.freeShipping,
@@ -322,6 +327,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         showPrices: input.showPrices,
         skipCart: input.skipCart,
         autoCheckout: input.autoCheckout,
+        poolMode: input.poolMode,
         itemSubtextTemplate: input.itemSubtextTemplate,
         showSubtextOnGifts: input.showSubtextOnGifts,
         freeShipping: input.freeShipping,

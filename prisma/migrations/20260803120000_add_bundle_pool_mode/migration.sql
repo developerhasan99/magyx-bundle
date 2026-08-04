@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Bundle" ADD COLUMN     "poolMode" TEXT NOT NULL DEFAULT 'PER_PACKAGE';

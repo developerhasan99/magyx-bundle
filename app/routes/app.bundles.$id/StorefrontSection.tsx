@@ -11,11 +11,13 @@ import { WidgetStyleCard } from "./WidgetStyleCard";
 import { AccentColorPicker } from "./AccentColorPicker";
 import { WIDGET_STYLE_OPTIONS } from "./types";
 
-// Storefront widget appearance for the two types that publish a product page
-// widget: FIXED ("what's inside") and SLOT_BUILDER (the box builder).
-// Grouped into subsections so the type-specific controls (layout picker,
-// checkout behavior) read as distinct choices rather than one flat list.
-export function AppearanceSection({
+// Everything about how this bundle behaves on the storefront, for the two
+// types that publish a product page widget: FIXED ("what's inside") and
+// SLOT_BUILDER (the box builder). Deliberately not called "appearance" —
+// it also owns checkout behaviour, which is the opposite of cosmetic.
+// Grouped into subsections so the type-specific controls read as distinct
+// choices rather than one flat list.
+export function StorefrontSection({
   type,
   widgetStyle,
   setWidgetStyle,
@@ -63,11 +65,11 @@ export function AppearanceSection({
     <BlockStack gap="500">
       <BlockStack gap="100">
         <Text as="h2" variant="headingMd">
-          Appearance
+          Storefront
         </Text>
         <Text as="p" variant="bodySm" tone="subdued">
           {isSlotBuilder
-            ? "How the box builder looks on this bundle's product page. Every option lives here, not in the theme editor."
+            ? "How the box builder looks and behaves on this bundle's product page. Every option lives here, not in the theme editor."
             : "How the “what's inside” list looks on this bundle's product page. Every option lives here, not in the theme editor."}
         </Text>
       </BlockStack>
@@ -120,11 +122,19 @@ export function AppearanceSection({
         <Text as="h3" variant="headingSm">
           Product details
         </Text>
+        {/* The two widgets read this setting in different places, so the help
+            text has to say which. The old copy promised a "Free gift" badge,
+            which the contents widget renders from the item's own gift flag
+            regardless of this checkbox. */}
         <Checkbox
           label="Show item prices"
           checked={showPrices}
           onChange={setShowPrices}
-          helpText="Free gifts will also show a “Free gift” badge."
+          helpText={
+            isSlotBuilder
+              ? "Shows each product's price in the selection panel customers pick from."
+              : "Shows each product's price in the “what's inside” list."
+          }
         />
         <TextField
           label="Item subtext"

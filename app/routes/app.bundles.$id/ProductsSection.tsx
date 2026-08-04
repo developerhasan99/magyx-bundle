@@ -8,6 +8,7 @@ import {
   Thumbnail,
   Badge,
   TextField,
+  ChoiceList,
 } from "@shopify/polaris";
 import { DeleteIcon, ImageIcon, PlusIcon } from "@shopify/polaris-icons";
 import { BundleTypeCard } from "../../components/BundleTypeCard";
@@ -110,25 +111,22 @@ export function ProductsSection({
           ))}
         </div>
       ) : (
+        /* Plain radios, not selection cards. For Build a box this sits
+           directly under the pool-mode cards, and two identical card grids
+           stacked read as one control with four options rather than two
+           separate decisions. */
         type !== "FIXED" && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gap: "var(--p-space-300)",
-            }}
-          >
-            {POOL_SOURCE_OPTIONS.map((option) => (
-              <BundleTypeCard
-                key={option.value}
-                label={option.label}
-                description={option.helpText}
-                selected={poolSource === option.value}
-                disabled={false}
-                onSelect={() => setPoolSource(option.value)}
-              />
-            ))}
-          </div>
+          <ChoiceList
+            title="Where the pool comes from"
+            titleHidden
+            choices={POOL_SOURCE_OPTIONS.map((option) => ({
+              label: option.label,
+              value: option.value,
+              helpText: option.helpText,
+            }))}
+            selected={[poolSource]}
+            onChange={([value]) => setPoolSource(value)}
+          />
         )
       )}
       {showAllProductsNotice ? (
