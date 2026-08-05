@@ -885,11 +885,11 @@
 .magyx-slot-builder__heading {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px;
   font-weight: 700;
   font-size: 1.05em;
   text-align: center;
-  margin: 0 0 12px;
+  margin: 0 0 16px;
 }
 
 .magyx-slot-builder__heading::before,
@@ -897,7 +897,7 @@
   content: "";
   flex: 1 1 0;
   min-width: 12px;
-  height: 1px;
+  height: 2px;
   background: currentColor;
   opacity: 0.35;
 }
