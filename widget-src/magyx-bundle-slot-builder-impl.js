@@ -538,7 +538,15 @@ import {
         priceSaveEl.hidden = !hasSavings;
         if (hasSavings) {
           priceCompareEl.textContent = formatMoney(comparePrice, moneyFormat);
+          // Both forms are offered so the merchant's copy decides which shows:
+          // the default is "{percent}%", but a translation written as
+          // "Save {amount}" keeps rendering the money saved.
+          //
+          // Floored, never rounded — comparePrice is strictly greater than
+          // salePrice here so there's no divide-by-zero, and rounding 24.6%
+          // up to "25% off" advertises a discount the shopper doesn't get.
           priceSaveEl.textContent = t("priceSave", {
+            percent: Math.floor(((comparePrice - salePrice) / comparePrice) * 100),
             amount: formatMoney(comparePrice - salePrice, moneyFormat),
           });
         }

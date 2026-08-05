@@ -41,7 +41,7 @@ export const SLOT_BUILDER_TEXT_DEFAULTS = {
   progressChoose_one: "Choose {count} more product",
   progressChoose_other: "Choose {count} more products",
   progressComplete: "{count} of {total} selected",
-  priceSave: "Save {amount}",
+  priceSave: "Save {percent}%",
   pricePerUnit: "That's only {amount} per item.",
 
   modalTitleReady: "Your bundle is ready!",
@@ -95,6 +95,7 @@ export interface SlotBuilderTextField {
 export const SLOT_BUILDER_TEXT_PLACEHOLDERS = [
   "{count}",
   "{total}",
+  "{percent}",
   "{amount}",
   "{price}",
   "{title}",
@@ -142,7 +143,12 @@ export const SLOT_BUILDER_TEXT_FIELDS: SlotBuilderTextField[] = [
   { key: "progressChoose_one", group: "Progress", label: "Slots remaining — 1 left" },
   { key: "progressChoose_other", group: "Progress", label: "Slots remaining — 2+ left" },
   { key: "progressComplete", group: "Progress", label: "All slots filled" },
-  { key: "priceSave", group: "Progress", label: "Savings" },
+  {
+    key: "priceSave",
+    group: "Progress",
+    label: "Savings",
+    help: "{percent} is how much cheaper the bundle is than buying separately. Use {amount} instead to show the money saved.",
+  },
   { key: "pricePerUnit", group: "Progress", label: "Price per item" },
 
   { key: "modalTitleReady", group: "Selection panel", label: "Panel title — box complete" },
