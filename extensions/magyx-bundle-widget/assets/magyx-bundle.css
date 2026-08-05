@@ -1147,62 +1147,55 @@
   margin: 12px 0 0;
 }
 
+/* Full-width rows, stacked, rather than a grid of thumbnails. A grid can't be
+   balanced at both ends of the range: sized to look right on a phone the
+   cards leave most of a desktop row empty beside them, and sized to fill the
+   desktop row they become absurd on a phone. A row is full width by
+   definition, so there's nothing left to balance — and it matches the slot
+   list directly above it, which is the same list of the same products. */
 .magyx-slot-builder__gift-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
-  gap: 16px 10px;
-  padding-top: 14px;
-  align-items: start;
+  gap: 8px;
+  padding-top: 12px;
 }
 
+/* Deliberately the same shell as .magyx-slot-builder__slot — leading
+   thumbnail, title block, one trailing control. Unlocked reads like a filled
+   slot (solid border, full-colour thumbnail); exclusive reads like an empty
+   one (dashed border, greyed thumbnail), which is already this widget's
+   vocabulary for "not filled in yet". */
 .magyx-slot-builder__gift-card {
-  position: relative;
-  border: none;
-  background: none;
-  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid var(--bc-border);
+  border-radius: var(--bc-radius);
+  padding: 6px;
+  text-align: left;
   font: inherit;
   color: inherit;
-  text-align: center;
+  background: transparent;
 }
 
 button.magyx-slot-builder__gift-card {
   cursor: pointer;
+  border-style: dashed;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.magyx-slot-builder__gift-value {
-  position: absolute;
-  top: -10px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 9;
-  background: #ec3b76;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  line-height: 1;
-  padding: 5px 8px;
-  border-radius: 4px;
-  white-space: nowrap;
-}
-
-.magyx-slot-builder__gift-body {
-  position: relative;
-  aspect-ratio: 1;
-  border-radius: 14px;
-  overflow: hidden;
-  background: #f4f4f4;
+button.magyx-slot-builder__gift-card:hover {
+  border-color: var(--bc-accent);
+  background: rgba(0, 0, 0, 0.015);
 }
 
 .magyx-slot-builder__gift-image {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
   object-fit: cover;
-  display: block;
-  border-radius: 14px;
+  background: #f6f6f6;
+  flex-shrink: 0;
 }
 
 .magyx-slot-builder__gift-image--shipping {
@@ -1212,82 +1205,144 @@ button.magyx-slot-builder__gift-card {
   color: #6b6b6b;
 }
 
-/* The gift's name (product title, or "Free Shipping" for that virtual card).
-   Shown on unlocked cards only — an exclusive card renders its lock label
-   instead, so it never gets one of these. */
+.magyx-slot-builder__gift-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The gift's name, quantity-prefixed ("2 × Vanilla Candle") exactly as the
+   cart line property phrases it. Wraps rather than truncating: a row is wide
+   enough that a wrap is rare, and a clipped product name is worse than a
+   two-line one. */
 .magyx-slot-builder__gift-title {
-  font-size: 0.82em;
-  font-weight: 600;
-  line-height: 1.25;
-  margin: 6px 0 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  font-weight: bold;
+  line-height: 1.4;
+  font-size: 15px;
+}
+
+/* Truncates, unlike the title — same rule as the slot subtext. This line is
+   supporting detail, so keeping every row one height matters more than
+   showing all of it. */
+.magyx-slot-builder__gift-subtext {
+  margin-top: 1px;
+  opacity: 0.6;
+  font-size: 0.85em;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.magyx-slot-builder__gift-qty {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  z-index: 1;
-  background: rgba(0, 0, 0, 0.72);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 999px;
-}
+/* Trailing, in the slot's remove-button position. Nothing overhangs and
+   nothing is centred on a narrow card any more, so the badge can't collide
+   with a neighbour however long the amount runs.
 
-.magyx-slot-builder__gift-lock {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
+   Kept deliberately small: this column is a footnote next to the gift's name,
+   and every pixel it takes comes straight out of the title's, which is what
+   pushes a name like "Doftar som… Angel - No. 113 — 30ml" onto three lines.
+
+   Stacked rather than wrapped: the amount and the word that labels it go on
+   their own lines ("$129.99" over "VALUE"), which makes the column about as
+   wide as the amount alone. The split happens in stackedHtml() — see the note
+   there for why CSS wrapping can't be trusted to break in the right place. */
+.magyx-slot-builder__gift-value {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: #ffffff;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  font-size: 13px;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-}
-
-.magyx-slot-builder__gift-lock svg {
-  color: #f0f0f0;
-}
-
-/* Exclusive = a bigger package's gifts, the only locked state left — light
-   gray card with a "{Package} Exclusive" label. Clicking one switches to the
-   package that unlocks it. */
-.magyx-slot-builder__gift-card--exclusive .magyx-slot-builder__gift-body {
-  background: #ececec;
-}
-
-.magyx-slot-builder__gift-card--exclusive .magyx-slot-builder__gift-image {
-  /* hidden but still laid out so the card keeps its size */
-  visibility: hidden;
-  filter: none;
-  opacity: 0;
-  transform: none;
-}
-
-.magyx-slot-builder__gift-card--exclusive .magyx-slot-builder__gift-lock {
-  padding: 0 8px;
-  text-align: center;
-  color: #5c5c5c;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  font-size: 12px;
-  line-height: 1.3;
-  text-shadow: none;
-}
-
-.magyx-slot-builder__gift-card--exclusive .magyx-slot-builder__gift-lock svg {
   flex-shrink: 0;
+  max-width: 30%;
+  margin-right: 2px;
+  background: #ec3b76;
+  color: #fff;
+  font-weight: 800;
+  text-transform: uppercase;
+  line-height: 1.2;
+  text-align: center;
+  padding: 5px 9px;
+  /* Not a pill any more — a capsule around two stacked lines reads as a
+     mistake, where a rounded rectangle reads as a chip. */
+  border-radius: 8px;
+}
+
+/* The half that carries the number, so it's the one with the size. Never
+   wraps: a money format with a space in it ("1 299,99 kr") must stay whole,
+   and the ellipsis is a guard for an amount too long for the column rather
+   than something a real price reaches. */
+.magyx-slot-builder__gift-value-amount {
+  max-width: 100%;
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.magyx-slot-builder__gift-value-label {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  opacity: 0.92;
+}
+
+/* Exclusive = a bigger package's gift. Takes the value badge's place, so a
+   row has exactly one trailing element either way, held to the same width
+   ceiling. Clicking the row switches to the package that unlocks it. */
+.magyx-slot-builder__gift-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  max-width: 30%;
+  padding-right: 2px;
+  color: #6b6b6b;
+  font-size: 0.76em;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+/* Stacked on the package name, same shape as the value badge beside it —
+   the padlock stays on the left of both lines rather than joining the wrap. */
+.magyx-slot-builder__gift-lock-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.magyx-slot-builder__gift-lock-pack,
+.magyx-slot-builder__gift-lock-word {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.magyx-slot-builder__gift-lock-word {
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+/* Sized against the two stacked lines beside it, not the text size — it's the
+   badge's counterpart on a locked row, so it needs comparable presence. */
+.magyx-slot-builder__gift-lock svg {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
   color: #8a8a8a;
+}
+
+/* Greyed rather than hidden. The padlock used to sit on top of the thumbnail,
+   so the thumbnail had to go; now it sits beside it, and showing the product
+   the shopper hasn't unlocked yet is the whole point of the nudge. */
+.magyx-slot-builder__gift-card--exclusive .magyx-slot-builder__gift-image {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+
+.magyx-slot-builder__gift-card--exclusive .magyx-slot-builder__gift-title,
+.magyx-slot-builder__gift-card--exclusive .magyx-slot-builder__gift-subtext {
+  color: #5c5c5c;
 }
 
 .magyx-slot-builder__error {

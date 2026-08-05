@@ -78,6 +78,35 @@ import {
     return div.innerHTML;
   }
 
+  /* Splits a merchant string around the value that was interpolated into it,
+     so the two halves can be stacked instead of running along one line —
+     "$129.99 VALUE" becomes "$129.99" over "VALUE". Worth the split rather
+     than letting CSS wrap it: a plain wrap breaks at whichever space happens
+     to fall past the edge, which for a money format that uses spaces as
+     thousands separators ("1 299,99 KR VÄRDE") is the wrong one.
+
+     Splitting on the interpolated value instead means the break lands either
+     side of it whatever the merchant's word order, and the value keeps its
+     own class so it can be the emphasised half. A template that dropped the
+     placeholder entirely just renders as one line. */
+  function stackedHtml(label, token, tokenClass, restClass) {
+    var at = token ? String(label).indexOf(token) : -1;
+    if (at === -1) {
+      return '<span class="' + restClass + '">' + escapeHtml(label) + "</span>";
+    }
+    var parts = [];
+    var before = label.slice(0, at).trim();
+    var after = label.slice(at + token.length).trim();
+    if (before) parts.push([restClass, before]);
+    parts.push([tokenClass, token]);
+    if (after) parts.push([restClass, after]);
+    return parts
+      .map(function (part) {
+        return '<span class="' + part[0] + '">' + escapeHtml(part[1]) + "</span>";
+      })
+      .join("");
+  }
+
 
   // The cart-add form's hidden "id" field and Liquid's `variant.id` are plain
   // numeric ids; the metafield/proxy data carries GraphQL GIDs.
@@ -800,47 +829,73 @@ import {
           card.className =
             "magyx-slot-builder__gift-card" +
             (unlocked ? "" : " magyx-slot-builder__gift-card--exclusive");
-          card.title = (gift.quantity > 1 ? gift.quantity + " × " : "") + titleText;
 
+          /* Same row anatomy as a filled slot above — leading thumbnail, title
+             block, one trailing control — so the two lists read as one design
+             instead of a row list sitting on top of a thumbnail grid.
+
+             Phrasing content only: an exclusive card is a <button>, which
+             can't legally contain the <div>s a grid card used. Same constraint
+             emptySlot() works under. */
           var quantity = gift.quantity || 1;
+          // Matches the cart line property's own "2 × Vanilla Candle" form
+          // rather than a separate quantity chip — one less thing on the row,
+          // and the shopper sees the same phrasing here and in their cart.
+          var titleLine = (quantity > 1 ? quantity + " × " : "") + titleText;
+          card.title = titleLine;
+
           var value = !gift.isShipping && gift.price != null ? gift.price * quantity : null;
-          var badge = "";
-          if (value != null && value > 0) {
-            badge =
-              '<span class="magyx-slot-builder__gift-value">' +
-              escapeHtml(t("giftValue", { amount: formatMoney(value, moneyFormat) })) +
-              "</span>";
-          }
+          var amountText = value != null ? formatMoney(value, moneyFormat) : "";
 
           card.innerHTML =
-            badge +
-            '<div class="magyx-slot-builder__gift-body">' +
             (gift.isShipping
-              ? '<div class="magyx-slot-builder__gift-image magyx-slot-builder__gift-image--shipping">' +
-                '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="6" width="14" height="11" rx="1"></rect><path d="M15 10h4l3 3v4h-7z"></path><circle cx="6" cy="19" r="2"></circle><circle cx="17.5" cy="19" r="2"></circle></svg>' +
-                "</div>"
+              ? '<span class="magyx-slot-builder__gift-image magyx-slot-builder__gift-image--shipping">' +
+                '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="6" width="14" height="11" rx="1"></rect><path d="M15 10h4l3 3v4h-7z"></path><circle cx="6" cy="19" r="2"></circle><circle cx="17.5" cy="19" r="2"></circle></svg>' +
+                "</span>"
               : gift.imageUrl
                 ? '<img class="magyx-slot-builder__gift-image" loading="lazy" src="' +
                   gift.imageUrl +
                   '" alt="' +
                   escapeHtml(titleText) +
                   '">'
-                : '<div class="magyx-slot-builder__gift-image"></div>') +
-            (quantity > 1
-              ? '<span class="magyx-slot-builder__gift-qty">×' + quantity + "</span>"
+                : '<span class="magyx-slot-builder__gift-image"></span>') +
+            '<span class="magyx-slot-builder__gift-info">' +
+            '<span class="magyx-slot-builder__gift-title">' +
+            escapeHtml(titleLine) +
+            "</span>" +
+            // The merchant's subtext line, resolved per gift at publish time.
+            // A row has the width for it; the old grid card never did, so it
+            // was baked into the metafield and then thrown away here.
+            (gift.subtext
+              ? '<span class="magyx-slot-builder__gift-subtext">' +
+                escapeHtml(gift.subtext) +
+                "</span>"
               : "") +
+            "</span>" +
             (unlocked
-              ? ""
+              ? value != null && value > 0
+                ? '<span class="magyx-slot-builder__gift-value">' +
+                  stackedHtml(
+                    t("giftValue", { amount: amountText }),
+                    amountText,
+                    "magyx-slot-builder__gift-value-amount",
+                    "magyx-slot-builder__gift-value-label",
+                  ) +
+                  "</span>"
+                : ""
               : '<span class="magyx-slot-builder__gift-lock">' +
-                '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path><circle cx="12" cy="15.5" r="1.5" fill="currentColor" stroke="none"></circle></svg>' +
-                escapeHtml(lockLabel) +
-                "</span>") +
-            "</div>" +
-            (unlocked
-              ? '<p class="magyx-slot-builder__gift-title">' +
-                escapeHtml(titleText) +
-                "</p>"
-              : "");
+                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path><circle cx="12" cy="15.5" r="1.5" fill="currentColor" stroke="none"></circle></svg>' +
+                '<span class="magyx-slot-builder__gift-lock-text">' +
+                // Stacked on the package name for the same reason the value
+                // badge is: "50ML" over "Exclusive" is half the width.
+                stackedHtml(
+                  lockLabel,
+                  unlockPkgLabel,
+                  "magyx-slot-builder__gift-lock-pack",
+                  "magyx-slot-builder__gift-lock-word",
+                ) +
+                "</span>" +
+                "</span>");
 
           if (!unlocked) {
             var unlockIndex = entry.unlockIndex;
