@@ -4,6 +4,7 @@ import {
   InlineStack,
   Text,
   Badge,
+  Banner,
   Thumbnail,
   Box,
   Select,
@@ -72,6 +73,8 @@ export function PublishingCard({
   shopifyProduct,
   editBundleProduct,
   onCopyBundleId,
+  connectExistingProduct,
+  isConnecting,
 }: {
   type: string;
   shopCurrency: string;
@@ -83,6 +86,9 @@ export function PublishingCard({
   shopifyProduct: ShopifyProductPreview | null;
   editBundleProduct: () => void;
   onCopyBundleId: () => void;
+  /** Opens a product picker and re-links the bundle to the chosen product. */
+  connectExistingProduct: () => void;
+  isConnecting: boolean;
 }) {
   const meta = BUNDLE_TYPE_META[type] ?? BUNDLE_TYPE_META.MIX_MATCH;
 
@@ -107,6 +113,23 @@ export function PublishingCard({
         <Text as="p" variant="bodySm" tone="subdued">
           {meta.statusHelp}
         </Text>
+        {!isNew && (type === "FIXED" || type === "SLOT_BUILDER") && !shopifyProductId && (
+          <BlockStack gap="200">
+            <Text as="p" variant="bodySm" tone="subdued">
+              This bundle has no product yet. Saving it as Active creates one —
+              or link the one it used to have, if the connection was lost.
+            </Text>
+            <div>
+              <Button
+                variant="plain"
+                loading={isConnecting}
+                onClick={connectExistingProduct}
+              >
+                Connect an existing product
+              </Button>
+            </div>
+          </BlockStack>
+        )}
         {!isNew && (type === "FIXED" || type === "SLOT_BUILDER") && shopifyProductId && (
           shopifyProduct ? (
             <Box
@@ -162,11 +185,27 @@ export function PublishingCard({
               </InlineStack>
             </Box>
           ) : (
-            <div>
-              <Button variant="plain" onClick={editBundleProduct}>
-                View bundle product in admin
-              </Button>
-            </div>
+            <BlockStack gap="200">
+              <Banner tone="warning">
+                <p>
+                  This bundle points at a product that can't be loaded — it was
+                  probably deleted. Connect the right product, or save the
+                  bundle as Active to create a new one.
+                </p>
+              </Banner>
+              <InlineStack gap="200">
+                <Button
+                  variant="plain"
+                  loading={isConnecting}
+                  onClick={connectExistingProduct}
+                >
+                  Connect an existing product
+                </Button>
+                <Button variant="plain" onClick={editBundleProduct}>
+                  Open in admin
+                </Button>
+              </InlineStack>
+            </BlockStack>
           )
         )}
         {!isNew && type === "MIX_MATCH" && (

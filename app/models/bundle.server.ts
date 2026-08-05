@@ -480,6 +480,45 @@ export async function setBundleStatus(shop: string, id: string, status: BundleSt
   return prisma.bundle.update({ where: { id }, data: { status } });
 }
 
+/**
+ * Points a bundle at an existing Shopify product as its parent, for when the
+ * link is lost — the product was detached, or a publish half-finished — and
+ * the bundle would otherwise create a second, duplicate product on next save.
+ *
+ * Every package's `shopifyVariantId` is cleared as part of this. Those ids
+ * belong to whatever product was linked before and are meaningless (or
+ * dangling) against the new one. Clearing them is what makes the reconnect
+ * work rather than just not-break: with no id to chase, resolvePackageVariants
+ * falls back to matching each package to a variant by its pack option label —
+ * exactly the reconciliation a re-linked product needs, and the same path it
+ * already uses to recover from a publish that failed partway through.
+ *
+ * The next publish then reconciles the product: it adds or renames pack option
+ * values, repoints prices, and writes the app's metafields. It does NOT touch
+ * the product's title or description — nothing here issues a productUpdate.
+ * It does delete variants that don't correspond to a package, which is why
+ * the UI warns before calling this.
+ */
+export async function connectBundleProduct(
+  shop: string,
+  id: string,
+  shopifyProductId: string,
+) {
+  const existing = await prisma.bundle.findFirst({ where: { id, shop } });
+  if (!existing) throw new Response("Bundle not found", { status: 404 });
+
+  return prisma.$transaction(async (tx) => {
+    await tx.bundlePackage.updateMany({
+      where: { bundleId: id },
+      data: { shopifyVariantId: null },
+    });
+    return tx.bundle.update({
+      where: { id },
+      data: { shopifyProductId },
+    });
+  });
+}
+
 export async function setBundleProduct(id: string, shopifyProductId: string) {
   return prisma.bundle.update({ where: { id }, data: { shopifyProductId } });
 }

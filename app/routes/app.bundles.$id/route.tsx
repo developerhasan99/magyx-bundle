@@ -22,6 +22,7 @@ import { PlusIcon } from "@shopify/polaris-icons";
 import { SaveBar, TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../../shopify.server";
 import {
+  connectBundleProduct,
   createBundle,
   deleteBundle,
   duplicateBundle,
@@ -399,6 +400,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect("/app");
   }
 
+  // Re-links a bundle to an existing product. No publish here: the merchant
+  // saves afterwards, and that save runs the normal reconcile path — which
+  // is the same code that would have run had the link never been lost.
+  if (intent === "connect-product" && params.id !== "new") {
+    const productId = String(formData.get("productId") ?? "");
+    if (!productId.startsWith("gid://shopify/Product/")) {
+      return { errors: ["That doesn't look like a product. Pick one from the list."] };
+    }
+    await connectBundleProduct(session.shop, params.id!, productId);
+    return { connected: true };
+  }
+
   // The copy is always a DRAFT and owns no Shopify product yet (see
   // duplicateBundle), so there is nothing to publish and no reason to
   // resync the checkout metafield — only ACTIVE bundles appear in it.
@@ -764,6 +777,7 @@ export default function BundleBuilder() {
   const fetcher = useFetcher<typeof action>();
   const deleteFetcher = useFetcher<typeof action>();
   const duplicateFetcher = useFetcher<typeof action>();
+  const connectFetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
   const isNew = !bundle;
@@ -1510,6 +1524,54 @@ export default function BundleBuilder() {
     revalidator.revalidate();
   }, [shopify, bundle, revalidator]);
 
+  /* Re-links a bundle to a product that already exists, instead of leaving
+     the merchant to delete the orphan and let the next save build a duplicate.
+     See the picker's own filter below for why it's scoped the way it is. */
+  const connectExistingProduct = useCallback(async () => {
+    const selection = await shopify.resourcePicker({
+      type: "product",
+      multiple: false,
+      action: "select",
+      filter: {
+        // Product level only. The bundle owns this product's variants — one
+        // per package, created and repriced on every publish — so picking a
+        // variant here would imply a choice that doesn't exist, and whichever
+        // one was picked would be ignored.
+        variants: false,
+        // Draft and archived stay pickable, unlike the pool pickers: the
+        // product being reconnected is usually the bundle's own orphan, and
+        // that's exactly the thing a merchant is likely to have drafted or
+        // archived while working out what went wrong.
+      },
+      ...(bundle?.shopifyProductId
+        ? { selectionIds: [{ id: bundle.shopifyProductId }] }
+        : {}),
+    });
+    const picked = selection?.[0];
+    if (!picked) return;
+    connectFetcher.submit(
+      { intent: "connect-product", productId: picked.id },
+      { method: "POST" },
+    );
+  }, [shopify, bundle, connectFetcher]);
+
+  // The loader carries the linked product, so the card can only show the new
+  // link once the route's data is refetched.
+  useEffect(() => {
+    const data = connectFetcher.data;
+    if (connectFetcher.state !== "idle" || !data) return;
+    // `in` rather than optional chaining: the action returns several different
+    // shapes (save errors, duplicate, connect) and TypeScript only sees their
+    // union here, so the key has to be narrowed before it can be read.
+    if ("connected" in data && data.connected) {
+      shopify.toast.show("Product connected — save to finish linking it");
+      revalidator.revalidate();
+    } else if ("errors" in data && data.errors?.length) {
+      shopify.toast.show(data.errors[0], { isError: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectFetcher.state, connectFetcher.data]);
+
   const onCopyBundleId = useCallback(() => {
     if (!bundle) return;
     navigator.clipboard.writeText(bundle.id);
@@ -1815,6 +1877,8 @@ export default function BundleBuilder() {
                 shopifyProduct={shopifyProduct}
                 editBundleProduct={editBundleProduct}
                 onCopyBundleId={onCopyBundleId}
+                connectExistingProduct={connectExistingProduct}
+                isConnecting={connectFetcher.state !== "idle"}
               />
               <EditorNav
                 sections={sections}
