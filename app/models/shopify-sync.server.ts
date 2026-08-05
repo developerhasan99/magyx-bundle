@@ -538,11 +538,27 @@ function resolveItemSubtext(template: string, details: ItemDetails): string {
     .trim();
 }
 
+/* `nodes(ids:)` accepts at most 250 ids, and a selection that reaches into
+   metafields/variants on 250 nodes at once can also blow the query cost
+   budget and come back THROTTLED. Either way the whole response arrives with
+   `data: null`, which — for a soft-failing lookup like the subtext one — is
+   indistinguishable from "this shop has no subtext" and silently blanks the
+   line for every item. Every unbounded id list below is therefore split into
+   chunks that are individually safe and individually retried-or-lost, so one
+   bad chunk costs its own items rather than the whole pool. */
+const NODE_ID_CHUNK = 100;
+
+function chunkIds(ids: string[], size: number = NODE_ID_CHUNK): string[][] {
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) chunks.push(ids.slice(i, i + size));
+  return chunks;
+}
+
 /**
  * Resolves {{sku}}/{{vendor}}/{{type}}/{{barcode}}/{{weight}}/{{metafield:ns.key}}
  * /{{metafield:ns.key.value.field}} placeholders in the merchant's item
- * subtext template against live product data — one extra query, only made
- * when a template is actually set.
+ * subtext template against live product data — one extra query per chunk of
+ * ids, only made when a template is actually set.
  */
 export async function fetchItemSubtexts(
   admin: AdminApiContext,
@@ -561,49 +577,77 @@ export async function fetchItemSubtexts(
     .map((ref, i) => `mf${i}: metafield(namespace: "${ref.namespace}", key: "${ref.key}") { value }`)
     .join("\n");
 
-  const response = await admin.graphql(
-    `#graphql
-    query bundleItemSubtextDetails($productIds: [ID!]!, $variantIds: [ID!]!) {
-      products: nodes(ids: $productIds) {
-        ... on Product {
-          id
-          vendor
-          productType
-          ${plainFragment}
-        }
-      }
-      variants: nodes(ids: $variantIds) {
-        ... on ProductVariant {
-          id
-          sku
-          barcode
-          inventoryItem {
-            measurement {
-              weight { value unit }
-            }
+  const productById = new Map<string, Record<string, unknown>>();
+  const variantById = new Map<string, Record<string, unknown>>();
+
+  // Products and variants are asked for separately rather than as two aliased
+  // fields of one query: their id lists have different lengths, so pairing
+  // them into shared chunks would cap both at the shorter one's chunk count.
+  async function collectNodes(
+    label: string,
+    ids: string[],
+    selection: string,
+    into: Map<string, Record<string, unknown>>,
+  ): Promise<void> {
+    await Promise.all(
+      chunkIds(ids).map(async (chunk) => {
+        try {
+          const response = await admin.graphql(
+            `#graphql
+            query bundleItemSubtextDetails($ids: [ID!]!) {
+              nodes(ids: $ids) {
+                ${selection}
+              }
+            }`,
+            { variables: { ids: chunk } },
+          );
+          const json = (await response.json()) as {
+            data?: { nodes?: (Record<string, unknown> | null)[] };
+            errors?: unknown;
+          };
+          if (json.errors) {
+            console.warn(`Magyx Bundle: item subtext ${label} query errors`, JSON.stringify(json.errors));
           }
+          for (const node of json.data?.nodes ?? []) {
+            if (node) into.set(node.id as string, node);
+          }
+        } catch (error) {
+          // Partial results beat none: the items in this chunk lose their
+          // subtext, every other chunk's keep theirs.
+          console.warn(`Magyx Bundle: item subtext ${label} query failed`, error);
         }
-      }
-    }`,
-    { variables: { productIds, variantIds } },
-  );
-  const json = await response.json();
-  if ((json as { errors?: unknown }).errors) {
-    console.warn(
-      "Magyx Bundle: item subtext base query errors",
-      JSON.stringify((json as { errors?: unknown }).errors),
+      }),
     );
   }
-  const productById = new Map<string, Record<string, unknown>>(
-    ((json.data?.products ?? []) as (Record<string, unknown> | null)[])
-      .filter((p): p is Record<string, unknown> => Boolean(p))
-      .map((p) => [p.id as string, p]),
-  );
-  const variantById = new Map<string, Record<string, unknown>>(
-    ((json.data?.variants ?? []) as (Record<string, unknown> | null)[])
-      .filter((v): v is Record<string, unknown> => Boolean(v))
-      .map((v) => [v.id as string, v]),
-  );
+
+  await Promise.all([
+    collectNodes(
+      "product",
+      productIds,
+      `... on Product {
+        id
+        vendor
+        productType
+        ${plainFragment}
+      }`,
+      productById,
+    ),
+    collectNodes(
+      "variant",
+      variantIds,
+      `... on ProductVariant {
+        id
+        sku
+        barcode
+        inventoryItem {
+          measurement {
+            weight { value unit }
+          }
+        }
+      }`,
+      variantById,
+    ),
+  ]);
 
   // Kept in its own request: metaobject reference lookups are more likely to
   // hit a schema/argument edge case (e.g. a field key that doesn't exist on
@@ -611,42 +655,49 @@ export async function fetchItemSubtexts(
   // sku/vendor/plain-metafield placeholders resolved above.
   const metaobjectById = new Map<string, Record<string, unknown>>();
   if (metaobjectRefs.length > 0) {
-    try {
-      const metaobjectFragment = metaobjectRefs
-        .map(
-          (ref, i) => `mf${i}: metafield(namespace: "${ref.namespace}", key: "${ref.key}") {
-             reference { ... on Metaobject { field(key: "${ref.field}") { value } } }
-             references(first: 1) {
-               nodes { ... on Metaobject { field(key: "${ref.field}") { value } } }
-             }
-           }`,
-        )
-        .join("\n");
-      const moResponse = await admin.graphql(
-        `#graphql
-        query bundleItemSubtextMetaobjectDetails($productIds: [ID!]!) {
-          products: nodes(ids: $productIds) {
-            ... on Product {
-              id
-              ${metaobjectFragment}
-            }
+    const metaobjectFragment = metaobjectRefs
+      .map(
+        (ref, i) => `mf${i}: metafield(namespace: "${ref.namespace}", key: "${ref.key}") {
+           reference { ... on Metaobject { field(key: "${ref.field}") { value } } }
+           references(first: 1) {
+             nodes { ... on Metaobject { field(key: "${ref.field}") { value } } }
+           }
+         }`,
+      )
+      .join("\n");
+    await Promise.all(
+      chunkIds(productIds).map(async (chunk) => {
+        try {
+          const moResponse = await admin.graphql(
+            `#graphql
+            query bundleItemSubtextMetaobjectDetails($ids: [ID!]!) {
+              nodes(ids: $ids) {
+                ... on Product {
+                  id
+                  ${metaobjectFragment}
+                }
+              }
+            }`,
+            { variables: { ids: chunk } },
+          );
+          const moJson = (await moResponse.json()) as {
+            data?: { nodes?: (Record<string, unknown> | null)[] };
+            errors?: unknown;
+          };
+          if (moJson.errors) {
+            console.warn(
+              "Magyx Bundle: item subtext metaobject query errors — check that each {{metafield:ns.key.value.field}} field key exists on the referenced metaobject definition",
+              JSON.stringify(moJson.errors),
+            );
           }
-        }`,
-        { variables: { productIds } },
-      );
-      const moJson = await moResponse.json();
-      if ((moJson as { errors?: unknown }).errors) {
-        console.warn(
-          "Magyx Bundle: item subtext metaobject query errors — check that each {{metafield:ns.key.value.field}} field key exists on the referenced metaobject definition",
-          JSON.stringify((moJson as { errors?: unknown }).errors),
-        );
-      }
-      ((moJson.data?.products ?? []) as (Record<string, unknown> | null)[])
-        .filter((p): p is Record<string, unknown> => Boolean(p))
-        .forEach((p) => metaobjectById.set(p.id as string, p));
-    } catch (error) {
-      console.warn("Magyx Bundle: could not resolve metaobject reference fields", error);
-    }
+          for (const node of moJson.data?.nodes ?? []) {
+            if (node) metaobjectById.set(node.id as string, node);
+          }
+        } catch (error) {
+          console.warn("Magyx Bundle: could not resolve metaobject reference fields", error);
+        }
+      }),
+    );
   }
 
   const subtextByKey = new Map<string, string>();
@@ -934,51 +985,59 @@ export async function fetchProductPoolItems(
   if (productIds.length === 0) return [];
   const trimmedFilter = variantTitleFilter?.trim().toLowerCase();
 
-  const response = await admin.graphql(
-    `#graphql
-    query productPoolItems($ids: [ID!]!) {
-      nodes(ids: $ids) {
-        ... on Product {
-          id
-          title
-          tags
-          featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
-          variants(first: 100) {
-            edges {
-              node {
-                id
-                title
-                price
-                availableForSale
-                image { url(transform: { maxWidth: 360, maxHeight: 360 }) }
+  // The live app-proxy path passes a whole collection's products here with no
+  // cap, so this is chunked for the same reason the subtext lookup is.
+  const responses = await Promise.all(
+    chunkIds(productIds).map((chunk) =>
+      admin.graphql(
+        `#graphql
+        query productPoolItems($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Product {
+              id
+              title
+              tags
+              featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
+              variants(first: 100) {
+                edges {
+                  node {
+                    id
+                    title
+                    price
+                    availableForSale
+                    image { url(transform: { maxWidth: 360, maxHeight: 360 }) }
+                  }
+                }
               }
             }
           }
-        }
-      }
-    }`,
-    { variables: { ids: productIds } },
+        }`,
+        { variables: { ids: chunk } },
+      ),
+    ),
   );
-  const json = await response.json();
 
   const items: ProductPoolItem[] = [];
-  for (const product of json.data?.nodes ?? []) {
-    if (!product) continue;
-    for (const edge of product.variants?.edges ?? []) {
-      const variant = edge.node;
-      if (trimmedFilter && !(variant.title ?? "").toLowerCase().includes(trimmedFilter)) continue;
-      items.push({
-        productId: product.id,
-        variantId: variant.id,
-        title: composeProductTitle(product.title, variant.title ?? ""),
-        productTitle: product.title,
-        variantTitle: variant.title ?? "",
-        image: variant.image?.url ?? product.featuredImage?.url ?? null,
-        price: parseFloat(variant.price),
-        available: variant.availableForSale,
-        subtext: null,
-        tags: product.tags ?? [],
-      });
+  for (const response of responses) {
+    const json = await response.json();
+    for (const product of json.data?.nodes ?? []) {
+      if (!product) continue;
+      for (const edge of product.variants?.edges ?? []) {
+        const variant = edge.node;
+        if (trimmedFilter && !(variant.title ?? "").toLowerCase().includes(trimmedFilter)) continue;
+        items.push({
+          productId: product.id,
+          variantId: variant.id,
+          title: composeProductTitle(product.title, variant.title ?? ""),
+          productTitle: product.title,
+          variantTitle: variant.title ?? "",
+          image: variant.image?.url ?? product.featuredImage?.url ?? null,
+          price: parseFloat(variant.price),
+          available: variant.availableForSale,
+          subtext: null,
+          tags: product.tags ?? [],
+        });
+      }
     }
   }
 
@@ -1000,44 +1059,50 @@ export async function fetchVariantPoolItems(
 ): Promise<ProductPoolItem[]> {
   if (variantIds.length === 0) return [];
 
-  const response = await admin.graphql(
-    `#graphql
-    query variantPoolItems($ids: [ID!]!) {
-      nodes(ids: $ids) {
-        ... on ProductVariant {
-          id
-          title
-          price
-          availableForSale
-          image { url(transform: { maxWidth: 360, maxHeight: 360 }) }
-          product {
-            id
-            title
-            tags
-            featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
+  const responses = await Promise.all(
+    chunkIds(variantIds).map((chunk) =>
+      admin.graphql(
+        `#graphql
+        query variantPoolItems($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on ProductVariant {
+              id
+              title
+              price
+              availableForSale
+              image { url(transform: { maxWidth: 360, maxHeight: 360 }) }
+              product {
+                id
+                title
+                tags
+                featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
+              }
+            }
           }
-        }
-      }
-    }`,
-    { variables: { ids: variantIds } },
+        }`,
+        { variables: { ids: chunk } },
+      ),
+    ),
   );
-  const json = await response.json();
 
   const items: ProductPoolItem[] = [];
-  for (const variant of json.data?.nodes ?? []) {
-    if (!variant || !variant.product) continue;
-    items.push({
-      productId: variant.product.id,
-      variantId: variant.id,
-      title: composeProductTitle(variant.product.title, variant.title ?? ""),
-      productTitle: variant.product.title,
-      variantTitle: variant.title ?? "",
-      image: variant.image?.url ?? variant.product.featuredImage?.url ?? null,
-      price: parseFloat(variant.price),
-      available: variant.availableForSale,
-      subtext: null,
-      tags: variant.product.tags ?? [],
-    });
+  for (const response of responses) {
+    const json = await response.json();
+    for (const variant of json.data?.nodes ?? []) {
+      if (!variant || !variant.product) continue;
+      items.push({
+        productId: variant.product.id,
+        variantId: variant.id,
+        title: composeProductTitle(variant.product.title, variant.title ?? ""),
+        productTitle: variant.product.title,
+        variantTitle: variant.title ?? "",
+        image: variant.image?.url ?? variant.product.featuredImage?.url ?? null,
+        price: parseFloat(variant.price),
+        available: variant.availableForSale,
+        subtext: null,
+        tags: variant.product.tags ?? [],
+      });
+    }
   }
 
   await attachPoolItemSubtext(admin, items, subtextTemplate);

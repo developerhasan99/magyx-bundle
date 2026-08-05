@@ -121,6 +121,35 @@ import {
     });
   }
 
+  /* Keeps the snapshot's subtext line on any live item that came back without
+     one, matched by variant id across every package.
+
+     Subtext is derived from the merchant's template, and the snapshot is
+     rebuilt on every publish — so a snapshot subtext can never be stale
+     against the current template, and clearing the template blanks both
+     sides. That makes a missing live subtext a resolution failure (a
+     throttled/errored metafield lookup soft-fails to null server-side) rather
+     than a deliberate removal, and without this the line would visibly
+     disappear the moment the live fetch replaced the snapshot — then come
+     back on the next page load, which renders the snapshot first. */
+  function carryOverSubtext(snapshotPool, livePool) {
+    var subtextByVariantId = {};
+    Object.keys(snapshotPool).forEach(function (packageVariantId) {
+      (snapshotPool[packageVariantId] || []).forEach(function (item) {
+        if (item && item.variantId && item.subtext) {
+          subtextByVariantId[item.variantId] = item.subtext;
+        }
+      });
+    });
+    Object.keys(livePool).forEach(function (packageVariantId) {
+      (livePool[packageVariantId] || []).forEach(function (item) {
+        if (item && !item.subtext && subtextByVariantId[item.variantId]) {
+          item.subtext = subtextByVariantId[item.variantId];
+        }
+      });
+    });
+  }
+
   function initWidget(root) {
     var data = readData(root);
     if (!data || !data.bundleId) {
@@ -224,6 +253,7 @@ import {
       })
       .then(function (pool) {
         var livePoolByVariantId = buildPoolMap(pool.packages, "items");
+        carryOverSubtext(poolByVariantId, livePoolByVariantId);
         if (rendered) {
           // Update the same object in place — currentPoolItems()/renderList()
           // read straight off this reference, so the next modal open or pack
