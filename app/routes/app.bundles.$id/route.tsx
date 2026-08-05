@@ -2191,6 +2191,7 @@ export default function BundleBuilder() {
                     translations={translations}
                     setTranslations={setTranslations}
                     widgetHeading={widgetHeading}
+                    itemSubtextTemplate={itemSubtextTemplate}
                     packages={packages}
                     updatePackage={updatePackageAt}
                   />

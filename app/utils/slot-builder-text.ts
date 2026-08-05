@@ -81,6 +81,29 @@ export type SlotBuilderTextKey = keyof typeof SLOT_BUILDER_TEXT_DEFAULTS;
     a built-in string, so the widget resolves it slightly differently. */
 export const HEADING_TEXT_KEY = "heading";
 
+/** Reserved key holding per-locale versions of the bundle's
+    `itemSubtextTemplate`. Unlike every other key here this one never reaches
+    the widget: it's a template ("{{sku}} · {{metafield:custom.material}}"),
+    and the server resolves it against each product before publishing, so the
+    storefront only ever sees the finished line. See resolveSubtextTemplate. */
+export const ITEM_SUBTEXT_TEXT_KEY = "itemSubtext";
+
+/** The subtext template to use for one locale: the merchant's override for
+    that language if they wrote one, else the bundle's own (primary-language)
+    template. Same tag-then-language chain as buildTranslator. */
+export function resolveSubtextTemplate(
+  translations: SlotBuilderTranslations | undefined,
+  primaryLocale: string | null | undefined,
+  locale: string | null | undefined,
+  fallback: string,
+): string {
+  for (const tag of [...localeChain(locale), ...localeChain(primaryLocale)]) {
+    const value = translations?.[tag]?.[ITEM_SUBTEXT_TEXT_KEY];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return fallback;
+}
+
 export interface SlotBuilderTextField {
   key: SlotBuilderTextKey;
   /** Section this field is grouped under in the admin editor. */

@@ -12,6 +12,7 @@ import {
 } from "@shopify/polaris";
 import {
   HEADING_TEXT_KEY,
+  ITEM_SUBTEXT_TEXT_KEY,
   SLOT_BUILDER_TEXT_DEFAULTS,
   SLOT_BUILDER_TEXT_FIELDS,
   slotBuilderTextGroups,
@@ -48,6 +49,7 @@ export function TranslationsSection({
   translations,
   setTranslations,
   widgetHeading,
+  itemSubtextTemplate,
   packages,
   updatePackage,
 }: {
@@ -56,6 +58,8 @@ export function TranslationsSection({
   setTranslations: (value: SlotBuilderTranslations) => void;
   /** Primary-language heading, shown as the placeholder for its overrides. */
   widgetHeading: string;
+  /** Primary-language subtext template, likewise. */
+  itemSubtextTemplate: string;
   packages: PackageState[];
   updatePackage: (index: number, patch: Partial<PackageState>) => void;
 }) {
@@ -145,10 +149,17 @@ export function TranslationsSection({
 
   // Only count fields the merchant filled in — the "N translated" badge is
   // meant to answer "have I finished this language?", so blanks don't count.
+  // The subtext only counts where there's a template to translate — a bundle
+  // that doesn't use one shouldn't be permanently one short of finished.
+  const countsSubtext = !isPrimarySelected && itemSubtextTemplate.trim() !== "";
   const filledCount =
     SLOT_BUILDER_TEXT_FIELDS.filter((f) => localeStrings[f.key]?.trim()).length +
-    (!isPrimarySelected && localeStrings[HEADING_TEXT_KEY]?.trim() ? 1 : 0);
-  const totalCount = SLOT_BUILDER_TEXT_FIELDS.length + (isPrimarySelected ? 0 : 1);
+    (!isPrimarySelected && localeStrings[HEADING_TEXT_KEY]?.trim() ? 1 : 0) +
+    (countsSubtext && localeStrings[ITEM_SUBTEXT_TEXT_KEY]?.trim() ? 1 : 0);
+  const totalCount =
+    SLOT_BUILDER_TEXT_FIELDS.length +
+    (isPrimarySelected ? 0 : 1) +
+    (countsSubtext ? 1 : 0);
 
   return (
     <BlockStack gap="500">
@@ -208,6 +219,34 @@ export function TranslationsSection({
           }
         />
       </BlockStack>
+      )}
+
+      {!isPrimarySelected && (
+        <>
+          <Divider />
+          <BlockStack gap="300">
+            <Text as="h3" variant="headingSm">
+              Product details
+            </Text>
+            {/* Only the words around the placeholders are translated here —
+                what {{sku}} and friends resolve to is catalog data, so a
+                metafield that needs translating is translated in Shopify's
+                Translate & Adapt, not in this app. */}
+            <TextField
+              label="Item subtext"
+              value={localeStrings[ITEM_SUBTEXT_TEXT_KEY] ?? ""}
+              onChange={(value) => setString(ITEM_SUBTEXT_TEXT_KEY, value)}
+              placeholder={itemSubtextTemplate || "Not set"}
+              autoComplete="off"
+              disabled={!itemSubtextTemplate.trim()}
+              helpText={
+                itemSubtextTemplate.trim()
+                  ? "Keep the {{…}} placeholders — only the text around them changes per language. Resolved for every product when you save, so republish after editing it."
+                  : "Set an item subtext in Storefront before translating it."
+              }
+            />
+          </BlockStack>
+        </>
       )}
 
       {!isPrimarySelected && packages.length > 0 && (

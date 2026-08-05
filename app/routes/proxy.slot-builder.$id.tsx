@@ -7,6 +7,11 @@ import {
   localizePoolItemTitles,
   resolveCollectionProductIds,
 } from "../models/shopify-sync.server";
+import {
+  parseTranslations,
+  resolveSubtextTemplate,
+  type SlotBuilderTranslations,
+} from "../utils/slot-builder-text";
 
 /**
  * App proxy endpoint: storefront requests to
@@ -58,9 +63,27 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   );
   const allProductIds = Array.from(new Set(productIdsByPackage.flat()));
 
+  // This response serves exactly one shopper's language, so the subtext is
+  // resolved from that language's template (falling back to the bundle's own)
+  // rather than carrying every locale the way the publish-time snapshot does.
+  // Same `locale` query param the titles below are localized with — it's part
+  // of the URL, so the Cache-Control at the bottom can't serve one language's
+  // subtext to another.
+  const locale = new URL(request.url).searchParams.get("locale");
+  const subtextTemplate = resolveSubtextTemplate(
+    parseTranslations<SlotBuilderTranslations>(bundle.translations, {}),
+    // No primary-locale step: the admin only offers the subtext field on
+    // non-primary languages (the primary one is the Storefront section's own
+    // field), so there is never a primary-keyed entry to find, and asking
+    // Shopify which locale is primary would cost a request per pool refresh.
+    null,
+    locale,
+    bundle.itemSubtextTemplate,
+  );
+
   const [variantItems, productItems] = await Promise.all([
-    fetchVariantPoolItems(admin, allVariantIds, bundle.itemSubtextTemplate),
-    fetchProductPoolItems(admin, allProductIds, bundle.itemSubtextTemplate),
+    fetchVariantPoolItems(admin, allVariantIds, subtextTemplate),
+    fetchProductPoolItems(admin, allProductIds, subtextTemplate),
   ]);
 
   // Product names live in the merchant's catalog, so they're translated in
@@ -70,7 +93,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // Safe to do before the variantFilter pass below: that matches on
   // `variantTitle`, which is never translated on purpose (see ProductPoolItem),
   // so a merchant's "50ml" filter keeps working in every language.
-  const locale = new URL(request.url).searchParams.get("locale");
   await localizePoolItemTitles(admin, [...variantItems, ...productItems], locale);
 
   const variantItemById = new Map(variantItems.map((item) => [item.variantId, item]));

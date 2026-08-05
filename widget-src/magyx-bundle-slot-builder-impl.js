@@ -196,27 +196,35 @@ import {
     /* Product and gift names come from the merchant's catalog, so they're
        translated in Shopify's own Translate & Adapt rather than in this app's
        Translations card — they arrive as a `titleByLocale` map beside the
-       untranslated `title`. Collapsed to a single `title` once, up front, so
-       every render site downstream stays locale-agnostic.
+       untranslated `title`. The subtext line arrives the same way
+       (`subtextByLocale`), though it's translated in this app: it's a template
+       resolved against product data, so the server bakes one finished line per
+       language rather than sending the template here. Both are collapsed to a
+       single `title`/`subtext` once, up front, so every render site downstream
+       stays locale-agnostic.
 
        Only the baked-in snapshot and gifts need this. The live pool fetch
-       below is given the shopper's locale and returns titles already in it,
-       with no map attached — and an older metafield with no maps at all just
-       keeps its untranslated titles. */
-    var localizedTitle = buildLocaleValueResolver(
+       below is given the shopper's locale and returns both already in it, with
+       no maps attached — and an older metafield with no maps at all just keeps
+       its untranslated values. */
+    var localizedValue = buildLocaleValueResolver(
       settings.primaryLocale,
       root.dataset.locale,
     );
-    function applyLocalizedTitles(items) {
+    function applyLocalizedText(items) {
       (items || []).forEach(function (item) {
-        if (item && item.titleByLocale) {
-          item.title = localizedTitle(item.titleByLocale, item.title);
+        if (!item) return;
+        if (item.titleByLocale) {
+          item.title = localizedValue(item.titleByLocale, item.title);
+        }
+        if (item.subtextByLocale) {
+          item.subtext = localizedValue(item.subtextByLocale, item.subtext);
         }
       });
     }
     packages.forEach(function (pkg) {
-      applyLocalizedTitles(pkg.poolSnapshot);
-      applyLocalizedTitles(pkg.gifts);
+      applyLocalizedText(pkg.poolSnapshot);
+      applyLocalizedText(pkg.gifts);
     });
 
     // Bundle-scoped snapshot baked in at publish time (a bounded handful of

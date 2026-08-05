@@ -2,7 +2,9 @@ import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 import { getBundles, setBundleProduct, setPackageVariant } from "./bundle.server";
 import {
   composeProductTitle,
+  ITEM_SUBTEXT_TEXT_KEY,
   localizedProductTitle,
+  resolveSubtextTemplate,
   type PackageTranslations,
   type SlotBuilderTranslations,
 } from "../utils/slot-builder-text";
@@ -555,17 +557,29 @@ function chunkIds(ids: string[], size: number = NODE_ID_CHUNK): string[][] {
 }
 
 /**
- * Resolves {{sku}}/{{vendor}}/{{type}}/{{barcode}}/{{weight}}/{{metafield:ns.key}}
- * /{{metafield:ns.key.value.field}} placeholders in the merchant's item
- * subtext template against live product data — one extra query per chunk of
- * ids, only made when a template is actually set.
+ * Reads the product/variant data the subtext placeholders
+ * ({{sku}}/{{vendor}}/{{type}}/{{barcode}}/{{weight}}/{{metafield:ns.key}}
+ * /{{metafield:ns.key.value.field}}) resolve against — one round of queries
+ * per chunk of ids, only for the placeholders the templates actually use.
+ *
+ * Takes every locale's template at once and fetches the union of what they
+ * reference, so translating the subtext into ten languages costs the same
+ * requests as one: the templates differ in their literal text, not usually in
+ * the data they pull, and resolving a template against these details is pure
+ * string work (see resolveItemSubtext).
  */
-export async function fetchItemSubtexts(
+async function fetchItemDetails(
   admin: AdminApiContext,
   items: { productId: string; variantId: string | null }[],
-  template: string,
-): Promise<Map<string, string>> {
-  const metafieldRefs = extractMetafieldRefs(template);
+  templates: string[],
+): Promise<Map<string, ItemDetails>> {
+  const metafieldRefs = Array.from(
+    new Map(
+      templates
+        .flatMap((template) => extractMetafieldRefs(template))
+        .map((ref) => [metafieldRefMapKey(ref), ref]),
+    ).values(),
+  );
   const plainRefs = metafieldRefs.filter((ref) => !ref.field);
   const metaobjectRefs = metafieldRefs.filter((ref) => ref.field);
   const productIds = Array.from(new Set(items.map((i) => i.productId)));
@@ -700,7 +714,7 @@ export async function fetchItemSubtexts(
     );
   }
 
-  const subtextByKey = new Map<string, string>();
+  const detailsByKey = new Map<string, ItemDetails>();
   for (const item of items) {
     const product = productById.get(item.productId);
     const metaobjectProduct = metaobjectById.get(item.productId);
@@ -726,17 +740,67 @@ export async function fetchItemSubtexts(
         | { measurement?: { weight?: { value: number; unit: string } | null } }
         | undefined
     )?.measurement?.weight;
-    const details: ItemDetails = {
+    detailsByKey.set(item.variantId ?? item.productId, {
       sku: (variant?.sku as string | null) ?? null,
       vendor: (product?.vendor as string | null) ?? null,
       type: (product?.productType as string | null) ?? null,
       barcode: (variant?.barcode as string | null) ?? null,
       weight: weight ? `${weight.value} ${weight.unit.toLowerCase()}` : null,
       metafields,
-    };
-    subtextByKey.set(item.variantId ?? item.productId, resolveItemSubtext(template, details));
+    });
+  }
+  return detailsByKey;
+}
+
+/**
+ * The merchant's subtext template resolved against each item, keyed by variant
+ * id (product id for a variant-less gift). One locale's worth — see
+ * fetchItemSubtextsByLocale for the translated form.
+ */
+export async function fetchItemSubtexts(
+  admin: AdminApiContext,
+  items: { productId: string; variantId: string | null }[],
+  template: string,
+): Promise<Map<string, string>> {
+  const detailsByKey = await fetchItemDetails(admin, items, [template]);
+  const subtextByKey = new Map<string, string>();
+  for (const [key, details] of detailsByKey) {
+    subtextByKey.set(key, resolveItemSubtext(template, details));
   }
   return subtextByKey;
+}
+
+/**
+ * Same, for every locale at once: key -> { locale -> subtext }.
+ *
+ * Only locales whose line actually differs from `primaryTemplate`'s are
+ * returned — an untranslated language, or one whose translation happens to
+ * resolve to the same string (a template of only placeholders, say), adds
+ * nothing the primary doesn't already say, and the display metafield this
+ * ends up in is size-sensitive.
+ */
+export async function fetchItemSubtextsByLocale(
+  admin: AdminApiContext,
+  items: { productId: string; variantId: string | null }[],
+  primaryTemplate: string,
+  templatesByLocale: Record<string, string>,
+): Promise<Map<string, Record<string, string>>> {
+  const locales = Object.keys(templatesByLocale);
+  const detailsByKey = await fetchItemDetails(admin, items, [
+    primaryTemplate,
+    ...locales.map((locale) => templatesByLocale[locale]),
+  ]);
+  const byKey = new Map<string, Record<string, string>>();
+  for (const [key, details] of detailsByKey) {
+    const primary = resolveItemSubtext(primaryTemplate, details);
+    const byLocale: Record<string, string> = {};
+    for (const locale of locales) {
+      const resolved = resolveItemSubtext(templatesByLocale[locale], details);
+      if (resolved && resolved !== primary) byLocale[locale] = resolved;
+    }
+    if (Object.keys(byLocale).length > 0) byKey.set(key, byLocale);
+  }
+  return byKey;
 }
 
 export interface ProductPoolItem {
@@ -764,31 +828,59 @@ export interface ProductPoolItem {
   price: number;
   available: boolean;
   subtext: string | null;
+  // Per-locale versions of `subtext`, from the merchant's per-language subtext
+  // templates. Same deal as `titleByLocale` above: baked into the publish-time
+  // snapshot because it has to serve every shopper, while the live proxy knows
+  // the one locale it's answering for and resolves `subtext` directly.
+  subtextByLocale?: Record<string, string>;
   // The parent product's tags — what the storefront pool modal's tag filter
   // chips (BundlePackage.tagFilters) match against.
   tags: string[];
 }
 
-// Same "{{sku}}/{{vendor}}/{{metafield:...}}" template the admin sets once
-// per bundle for the Bundle Contents widget — reused here so pool items show
-// the same subtext line everywhere. Soft-fails: a broken template shouldn't
-// blank out the pool. Shared by fetchProductPoolItems and
-// fetchVariantPoolItems below.
+/* The "{{sku}}/{{vendor}}/{{metafield:...}}" template the admin sets once per
+   bundle, in one or more languages.
+
+   A plain string is the single-locale form, used wherever the locale is
+   already decided — the live storefront proxy (it serves one shopper's
+   language) and the admin's own pool preview. The object form is for the
+   publish-time snapshot, which has to carry every language at once because it
+   is baked into a metafield read by shoppers in all of them. */
+export type SubtextTemplates =
+  | string
+  | {
+      /** Primary-language template — what `subtext` resolves from. */
+      primary: string;
+      /** Per-locale overrides, resolved into `subtextByLocale`. */
+      byLocale: Record<string, string>;
+    };
+
+// Soft-fails: a broken template shouldn't blank out the pool. Shared by
+// fetchProductPoolItems and fetchVariantPoolItems below.
 async function attachPoolItemSubtext(
   admin: AdminApiContext,
   items: ProductPoolItem[],
-  subtextTemplate?: string | null,
+  templates?: SubtextTemplates | null,
 ): Promise<void> {
-  const trimmedTemplate = subtextTemplate?.trim();
-  if (!trimmedTemplate) return;
+  const primary = (typeof templates === "string" ? templates : templates?.primary)?.trim();
+  const byLocale = typeof templates === "string" ? {} : (templates?.byLocale ?? {});
+  // A language can have its own subtext even where the primary one is blank,
+  // so translated templates alone are enough reason to do the lookup.
+  if (!primary && Object.keys(byLocale).length === 0) return;
+  const keys = items.map((item) => ({ productId: item.productId, variantId: item.variantId }));
   try {
-    const subtextByKey = await fetchItemSubtexts(
-      admin,
-      items.map((item) => ({ productId: item.productId, variantId: item.variantId })),
-      trimmedTemplate,
-    );
-    for (const item of items) {
-      item.subtext = subtextByKey.get(item.variantId) || null;
+    if (primary) {
+      const subtextByKey = await fetchItemSubtexts(admin, keys, primary);
+      for (const item of items) {
+        item.subtext = subtextByKey.get(item.variantId) || null;
+      }
+    }
+    if (Object.keys(byLocale).length > 0) {
+      const byKey = await fetchItemSubtextsByLocale(admin, keys, primary ?? "", byLocale);
+      for (const item of items) {
+        const localized = byKey.get(item.variantId);
+        if (localized) item.subtextByLocale = localized;
+      }
     }
   } catch (error) {
     console.warn("Magyx Bundle: could not resolve pool item subtext", error);
@@ -979,7 +1071,7 @@ export async function attachPoolItemTitlesByLocale(
 export async function fetchProductPoolItems(
   admin: AdminApiContext,
   productIds: string[],
-  subtextTemplate?: string | null,
+  subtextTemplates?: SubtextTemplates | null,
   variantTitleFilter?: string | null,
 ): Promise<ProductPoolItem[]> {
   if (productIds.length === 0) return [];
@@ -1041,7 +1133,7 @@ export async function fetchProductPoolItems(
     }
   }
 
-  await attachPoolItemSubtext(admin, items, subtextTemplate);
+  await attachPoolItemSubtext(admin, items, subtextTemplates);
   return items;
 }
 
@@ -1055,7 +1147,7 @@ export async function fetchProductPoolItems(
 export async function fetchVariantPoolItems(
   admin: AdminApiContext,
   variantIds: string[],
-  subtextTemplate?: string | null,
+  subtextTemplates?: SubtextTemplates | null,
 ): Promise<ProductPoolItem[]> {
   if (variantIds.length === 0) return [];
 
@@ -1105,7 +1197,7 @@ export async function fetchVariantPoolItems(
     }
   }
 
-  await attachPoolItemSubtext(admin, items, subtextTemplate);
+  await attachPoolItemSubtext(admin, items, subtextTemplates);
   return items;
 }
 
@@ -1784,6 +1876,11 @@ function pruneTranslations(
   for (const [locale, strings] of Object.entries(translations ?? {})) {
     const kept: Record<string, string> = {};
     for (const [key, value] of Object.entries(strings ?? {})) {
+      // The subtext template is resolved into each item's own `subtext`/
+      // `subtextByLocale` above, so shipping the template itself would put
+      // raw "{{metafield:custom.material}}" in the page source for a string
+      // the widget has no way to use.
+      if (key === ITEM_SUBTEXT_TEXT_KEY) continue;
       const trimmed = typeof value === "string" ? value.trim() : "";
       if (trimmed) kept[key] = trimmed;
     }
@@ -2035,12 +2132,55 @@ export async function publishSlotBuilderBundleProduct(
   // collection-scoped pool can change without a republish). Soft-fails: a
   // broken storefront card list shouldn't block saving.
   try {
+    /* Published only, and never the primary: an unpublished language can't be
+       reached by a shopper, and baking catalog-derived strings for it would
+       grow the metafield for nobody. (Widget copy the merchant typed is baked
+       for every locale regardless — it's a few dozen short strings, and it
+       means publishing a language in Shopify works immediately without a
+       republish here. The subtext can't work that way: it isn't copy the
+       widget renders, it's a template resolved against product data, so its
+       output has to be baked per language at publish time.) */
+    const secondaryLocales = (await fetchShopLocales(admin))
+      .filter((l) => l.published && !l.primary)
+      .map((l) => l.locale);
+
     const subtextTemplate = input.widgetSettings.itemSubtextTemplate.trim();
+    // A language only gets an entry when the merchant actually wrote it a
+    // different template — resolveSubtextTemplate otherwise hands back the
+    // primary one, which the snapshot's plain `subtext` already carries.
+    const subtextTemplatesByLocale: Record<string, string> = {};
+    for (const locale of secondaryLocales) {
+      const translated = resolveSubtextTemplate(
+        input.translations,
+        input.primaryLocale,
+        locale,
+        subtextTemplate,
+      );
+      if (translated !== subtextTemplate) subtextTemplatesByLocale[locale] = translated;
+    }
+    const subtextTemplates: SubtextTemplates = {
+      primary: subtextTemplate,
+      byLocale: subtextTemplatesByLocale,
+    };
+    const hasSubtext =
+      Boolean(subtextTemplate) || Object.keys(subtextTemplatesByLocale).length > 0;
+
     const allGiftDisplayItems = input.packages.flatMap((p) => p.giftDisplayItems);
     let subtextByKey: Map<string, string> | null = null;
-    if (subtextTemplate && input.widgetSettings.showSubtextOnGifts && allGiftDisplayItems.length > 0) {
+    let giftSubtextsByLocale: Map<string, Record<string, string>> | null = null;
+    if (hasSubtext && input.widgetSettings.showSubtextOnGifts && allGiftDisplayItems.length > 0) {
       try {
-        subtextByKey = await fetchItemSubtexts(admin, allGiftDisplayItems, subtextTemplate);
+        if (subtextTemplate) {
+          subtextByKey = await fetchItemSubtexts(admin, allGiftDisplayItems, subtextTemplate);
+        }
+        if (Object.keys(subtextTemplatesByLocale).length > 0) {
+          giftSubtextsByLocale = await fetchItemSubtextsByLocale(
+            admin,
+            allGiftDisplayItems,
+            subtextTemplate,
+            subtextTemplatesByLocale,
+          );
+        }
       } catch (error) {
         console.warn("Magyx Bundle: could not resolve item subtext template", error);
       }
@@ -2053,7 +2193,7 @@ export async function publishSlotBuilderBundleProduct(
             // Respect exactly the variant(s) the merchant picked — no
             // expansion to sibling variants, same as the live proxy fetch.
             const variantIds = Array.from(new Set(pkg.poolVariantIds)).slice(0, POOL_SNAPSHOT_LIMIT);
-            return await fetchVariantPoolItems(admin, variantIds, subtextTemplate);
+            return await fetchVariantPoolItems(admin, variantIds, subtextTemplates);
           }
           // COLLECTIONS-sourced: no merchant-picked variant to respect, so
           // every variant of every product is pickable. fetchProductPoolItems
@@ -2067,7 +2207,7 @@ export async function publishSlotBuilderBundleProduct(
           const items = await fetchProductPoolItems(
             admin,
             productIds,
-            subtextTemplate,
+            subtextTemplates,
             pkg.variantFilter,
           );
           return items.slice(0, POOL_SNAPSHOT_LIMIT);
@@ -2085,14 +2225,6 @@ export async function publishSlotBuilderBundleProduct(
        untranslated title already is that language. Localized after the
        per-package fetches above so it's one batched lookup for the whole
        bundle instead of one per package. */
-    // Published only, and never the primary: an unpublished language can't be
-    // reached by a shopper, and baking titles for it would grow the metafield
-    // for nobody. (Widget copy the merchant typed is baked for every locale
-    // regardless — it's a few dozen short strings, and it means publishing a
-    // language in Shopify works immediately without a republish here.)
-    const secondaryLocales = (await fetchShopLocales(admin))
-      .filter((l) => l.published && !l.primary)
-      .map((l) => l.locale);
     if (secondaryLocales.length > 0) {
       await attachPoolItemTitlesByLocale(
         admin,
@@ -2174,6 +2306,7 @@ export async function publishSlotBuilderBundleProduct(
           quantity: item.quantity,
           price: item.variantId ? (priceByVariant.get(item.variantId) ?? null) : null,
           subtext: subtextByKey?.get(item.variantId ?? item.productId) || null,
+          subtextByLocale: giftSubtextsByLocale?.get(item.variantId ?? item.productId),
         })),
       })),
     };

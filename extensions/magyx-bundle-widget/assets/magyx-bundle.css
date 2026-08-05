@@ -872,10 +872,34 @@
   margin: 0 0 16px;
 }
 
+/* Centred, with a rule running out to each edge. The rules are pseudo-
+   elements rather than a border on the row, so they stop short of the text
+   instead of running behind it, and `flex: 1` keeps them symmetrical at any
+   width — including the degenerate case of a heading long enough to leave
+   almost no room, where they shrink instead of pushing the text off-centre.
+
+   `currentColor` at low opacity rather than --bc-border: the border grey is
+   tuned for card edges against a white background, and is close to invisible
+   as a lone hairline. This follows the theme's own text colour, so it stays
+   visible on a dark section too. */
 .magyx-slot-builder__heading {
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-weight: 700;
   font-size: 1.05em;
+  text-align: center;
   margin: 0 0 12px;
+}
+
+.magyx-slot-builder__heading::before,
+.magyx-slot-builder__heading::after {
+  content: "";
+  flex: 1 1 0;
+  min-width: 12px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.35;
 }
 
 .magyx-slot-builder__packs {
