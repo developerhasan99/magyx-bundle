@@ -425,6 +425,10 @@ async function publishProductToOnlineStore(admin: AdminApiContext, productId: st
 // variants (one per package) on the same product, each carrying its own
 // checkout-truth metafield.
 interface FixedBundlePackageInput {
+  /** Optional merchant override for the compare-at price. null falls back
+      to the computed one. Whichever wins is set on the Shopify variant, so
+      Shopify converts it per market like any other price. */
+  compareAtPrice: number | null;
   packageId: string;
   // The Shopify variant this package was last published to, if any — used to
   // match packages to variants across saves (renames, additions, removals)
@@ -1175,7 +1179,12 @@ export async function publishFixedBundleProduct(
     price: bundlePrice.toFixed(2),
     // Combined component price as the strikethrough price; cleared when
     // there's no actual saving so themes don't show "$X $X"
-    compareAtPrice: combinedPrice > bundlePrice ? combinedPrice.toFixed(2) : null,
+    // The merchant's own figure when they set one, otherwise the combined
+    // component price. Either way it goes on the variant rather than into
+    // our metafield, which is what makes Shopify convert it per market.
+    // Still cleared when it isn't above the bundle price, so themes never
+    // render "$X $X".
+    compareAtPrice: resolveCompareAt(pkg.compareAtPrice, combinedPrice, bundlePrice)?.toFixed(2) ?? null,
     metafields: [
       {
         namespace: CONFIG_NAMESPACE,
@@ -1564,6 +1573,10 @@ async function resolvePackageVariants(
 // its own price, slot count, product pool, and whatever fixed free gifts
 // ship alongside it. Each package's pool is independent of the others.
 interface SlotBuilderPackageInput {
+  /** Optional merchant override for the compare-at price. null falls back
+      to the computed one. Whichever wins is set on the Shopify variant, so
+      Shopify converts it per market like any other price. */
+  compareAtPrice: number | null;
   packageId: string;
   existingVariantId?: string | null;
   label: string;
@@ -1739,6 +1752,24 @@ function prunePackageTranslations(
 }
 
 /**
+ * The compare-at price to publish on a package's variant: the merchant's own
+ * figure when they entered one, otherwise the value the app computes
+ * (components summed for FIXED, pool average x slot count for SLOT_BUILDER).
+ *
+ * Returns null — not undefined — when there's no saving to show, so the write
+ * actively clears a compare-at published earlier rather than leaving a stale
+ * one on the variant.
+ */
+function resolveCompareAt(
+  override: number | null,
+  computed: number,
+  price: number,
+): number | null {
+  const compareAt = override != null ? override : computed;
+  return compareAt > price ? compareAt : null;
+}
+
+/**
  * Publishes/updates a SLOT_BUILDER bundle's parent Shopify product — one
  * variant per package (bottle size, pack size, ...), each priced at that
  * package's flat price (plus an optional compare-at price averaged from its
@@ -1881,8 +1912,12 @@ export async function publishSlotBuilderBundleProduct(
     return {
       id: variantIdByPackageId.get(pkg.packageId)!,
       price: pkg.pricingValue.toFixed(2),
-      // Cleared when there's no actual saving so themes don't show "$X $X"
-      compareAtPrice: combinedPrice > pkg.pricingValue ? combinedPrice.toFixed(2) : null,
+      // Merchant's override when set, otherwise the pool average x slot
+      // count computed above. Cleared when there's no actual saving so
+      // themes don't show "$X $X".
+      compareAtPrice:
+        resolveCompareAt(pkg.compareAtPrice, combinedPrice, pkg.pricingValue)?.toFixed(2) ??
+        null,
       // The free-shipping Discount Function reads `freeShipping` off this
       // metafield (see extensions/magyx-free-shipping/src/run.js) — it can't
       // use the `_magyx_free_shipping` attribute the Cart Transform stamps,
@@ -2050,6 +2085,15 @@ export async function publishSlotBuilderBundleProduct(
         // falls back to the three fields above when a locale has no entry.
         translations: prunePackageTranslations(pkg.translations),
         price: pkg.pricingValue,
+        // The same figure written to the variant above. The widget used to
+        // sum the first `slotCount` pool items itself, which is a third
+        // calculation that could disagree with both the variant and the
+        // editor's preview — and ignored the merchant's override entirely.
+        compareAtPrice: resolveCompareAt(
+          pkg.compareAtPrice,
+          combinedPriceByPackageId.get(pkg.packageId) ?? 0,
+          pkg.pricingValue,
+        ),
         slotCount: pkg.slotCount,
         freeShipping: pkg.freeShipping,
         tagFilters: pkg.tagFilters,

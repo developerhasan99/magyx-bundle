@@ -17,6 +17,9 @@ export function PricingSection({
   onPricingTypeChange,
   onPricingValueChange,
   pricingValueError,
+  compareAtPrice,
+  onCompareAtPriceChange,
+  computedCompareAtPrice,
 }: {
   type: string;
   shopCurrency: string;
@@ -25,6 +28,11 @@ export function PricingSection({
   onPricingTypeChange: (value: string) => void;
   onPricingValueChange: (value: string) => void;
   pricingValueError: string | undefined;
+  /** Merchant override; empty string means "use the computed one". */
+  compareAtPrice: string;
+  onCompareAtPriceChange: (value: string) => void;
+  /** What the app works out on its own, shown as the placeholder. */
+  computedCompareAtPrice: number;
 }) {
   return (
     <BlockStack gap="400">
@@ -69,6 +77,25 @@ export function PricingSection({
               : undefined
           }
         />
+        <TextField
+          label="Compare-at price"
+          type="number"
+          min={0}
+          value={compareAtPrice}
+          onChange={onCompareAtPriceChange}
+          autoComplete="off"
+          prefix={currencySymbol(shopCurrency)}
+          placeholder={
+            computedCompareAtPrice > 0
+              ? String(computedCompareAtPrice)
+              : undefined
+          }
+          helpText={
+            computedCompareAtPrice > 0
+              ? `Optional. Leave empty to use ${formatMoney(computedCompareAtPrice, shopCurrency)}, worked out from the products themselves. Either way it's saved on the bundle's variant, so Shopify shows it in each customer's own currency.`
+              : "Optional. Saved on the bundle's variant, so Shopify shows it in each customer's own currency."
+          }
+        />
     </BlockStack>
   );
 }
@@ -85,6 +112,8 @@ export function PricingSummaryBox({
   computedBundlePrice,
   savings,
   hasMissingPrices,
+  effectiveCompareAtPrice,
+  isCompareAtOverridden,
 }: {
   type: string;
   shopCurrency: string;
@@ -93,6 +122,9 @@ export function PricingSummaryBox({
   computedBundlePrice: number;
   savings: number;
   hasMissingPrices: boolean;
+  /** Override when set, otherwise `combinedPrice` — what actually ships. */
+  effectiveCompareAtPrice: number;
+  isCompareAtOverridden: boolean;
 }) {
   if (!(type === "FIXED" || type === "SLOT_BUILDER") || paidItems.length === 0) return null;
   return (
@@ -100,7 +132,9 @@ export function PricingSummaryBox({
       <BlockStack gap="200">
         <InlineStack align="space-between" blockAlign="center">
           <Text as="span" variant="bodyMd" tone="subdued">
-            Original price (compare-at)
+            {isCompareAtOverridden
+              ? "Compare-at price (yours)"
+              : "Original price (compare-at)"}
           </Text>
           <Text
             as="span"
@@ -110,7 +144,7 @@ export function PricingSummaryBox({
               savings > 0 ? "line-through" : undefined
             }
           >
-            {formatMoney(combinedPrice, shopCurrency)}
+            {formatMoney(effectiveCompareAtPrice, shopCurrency)}
           </Text>
         </InlineStack>
         <InlineStack align="space-between" blockAlign="center">
@@ -140,15 +174,19 @@ export function PricingSummaryBox({
         </InlineStack>
         {savings > 0 ? (
           <Text as="p" variant="bodySm" tone="subdued">
-            {type === "SLOT_BUILDER"
-              ? `The original ${formatMoney(combinedPrice, shopCurrency)} price — the pool's average item price times the slot count — is set as the compare-at (strikethrough) price on the bundle product.`
-              : `The original ${formatMoney(combinedPrice, shopCurrency)} combined price is set as the compare-at (strikethrough) price on the bundle product.`}
+            {isCompareAtOverridden
+              ? `${formatMoney(effectiveCompareAtPrice, shopCurrency)} is set as the compare-at (strikethrough) price on the bundle product, replacing the ${formatMoney(combinedPrice, shopCurrency)} worked out from the products.`
+              : type === "SLOT_BUILDER"
+                ? `The original ${formatMoney(combinedPrice, shopCurrency)} price — the pool's average item price times the slot count — is set as the compare-at (strikethrough) price on the bundle product.`
+                : `The original ${formatMoney(combinedPrice, shopCurrency)} combined price is set as the compare-at (strikethrough) price on the bundle product.`}
           </Text>
         ) : (
           <Text as="p" variant="bodySm" tone="caution">
-            {type === "SLOT_BUILDER"
-              ? "The bundle price isn't below the pool's average price for this many slots, so no compare-at price will be shown to customers."
-              : "The bundle price isn't below the combined price of its products, so no compare-at price will be shown to customers."}
+            {isCompareAtOverridden
+              ? "Your compare-at price isn't above the bundle price, so no strikethrough will be shown to customers."
+              : type === "SLOT_BUILDER"
+                ? "The bundle price isn't below the pool's average price for this many slots, so no compare-at price will be shown to customers."
+                : "The bundle price isn't below the combined price of its products, so no compare-at price will be shown to customers."}
           </Text>
         )}
         {hasMissingPrices && (

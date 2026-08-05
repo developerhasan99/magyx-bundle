@@ -112,6 +112,8 @@ export interface PackageState {
   badgeTone: string; // "" = no badge
   pricingType: string;
   pricingValue: string;
+  // Optional compare-at override. Empty string = use the computed one.
+  compareAtPrice: string;
   freeShipping: boolean;
   items: ItemState[];
   // SLOT_BUILDER only: this package's own product pool + slot count.
@@ -140,6 +142,7 @@ export function defaultPackageState(): PackageState {
     badgeTone: "",
     pricingType: "FIXED_PRICE",
     pricingValue: "",
+    compareAtPrice: "",
     freeShipping: false,
     items: [],
     poolSource: "PRODUCTS",

@@ -330,6 +330,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         badgeTone: p.badgeTone,
         pricingType: p.pricingType,
         pricingValue: p.pricingValue,
+        compareAtPrice: p.compareAtPrice,
         freeShipping: p.freeShipping,
         shopifyVariantId: p.shopifyVariantId,
         poolSource: p.poolSource,
@@ -537,6 +538,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             badgeTone: pkg.badgeTone,
             pricingType: pkg.pricingType,
             pricingValue: pkg.pricingValue,
+            compareAtPrice: pkg.compareAtPrice,
             freeShipping: pkg.freeShipping,
             componentVariantIds: pkg.items
               .filter((i) => i.variantId)
@@ -604,6 +606,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             badgeText: pkg.badgeText,
             badgeTone: pkg.badgeTone,
             pricingValue: pkg.pricingValue,
+            compareAtPrice: pkg.compareAtPrice,
             freeShipping: pkg.freeShipping,
             poolSource: pkg.poolSource,
             slotCount: pkg.slotCount,
@@ -697,6 +700,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
               badgeTone: p.badgeTone ?? "",
               pricingType: p.pricingType,
               pricingValue: String(p.pricingValue),
+              compareAtPrice: p.compareAtPrice == null ? "" : String(p.compareAtPrice),
               freeShipping: p.freeShipping,
               poolSource: p.poolSource ?? "PRODUCTS",
               collections: (p.collections ?? []) as CollectionState[],
@@ -1680,6 +1684,12 @@ export default function BundleBuilder() {
                 position,
                 pricingType: pkg.pricingType,
                 pricingValue: parseFloat(pkg.pricingValue) || 0,
+                // Blank means "use the computed compare-at", which is why it
+                // has to persist as null rather than 0.
+                compareAtPrice:
+                  pkg.compareAtPrice.trim() === ""
+                    ? null
+                    : parseFloat(pkg.compareAtPrice) || null,
                 freeShipping: pkg.freeShipping,
                 poolSource: type === "SLOT_BUILDER" ? pkg.poolSource : "PRODUCTS",
                 slotCount: type === "SLOT_BUILDER" ? parseInt(pkg.slotCount, 10) || 0 : 0,
@@ -1769,7 +1779,17 @@ export default function BundleBuilder() {
       : (parseFloat(activePricingValue) || 0) < 0
         ? "Value can't be negative."
         : undefined;
-  const savings = Math.round((combinedPrice - computedBundlePrice) * 100) / 100;
+  /* What the storefront will actually strike through: the merchant's
+     override when they set one, otherwise the computed combined price —
+     the same precedence publish uses when writing the variant. */
+  const effectiveCompareAtPrice = useMemo(() => {
+    const raw = packages[activePackageIndex]?.compareAtPrice ?? "";
+    if (raw.trim() === "") return combinedPrice;
+    const value = parseFloat(raw);
+    return Number.isFinite(value) ? value : combinedPrice;
+  }, [packages, activePackageIndex, combinedPrice]);
+  const savings =
+    Math.round((effectiveCompareAtPrice - computedBundlePrice) * 100) / 100;
 
   const showCollectionPool = type !== "FIXED" && activePoolSource === "COLLECTIONS";
   // QUANTITY_BREAKS only — every other type only ever has PRODUCTS/COLLECTIONS
@@ -1950,6 +1970,11 @@ export default function BundleBuilder() {
                             updateActivePackage({ pricingValue: value })
                           }
                           pricingValueError={pricingValueError}
+                          compareAtPrice={packages[activePackageIndex]?.compareAtPrice ?? ""}
+                          onCompareAtPriceChange={(value) =>
+                            updateActivePackage({ compareAtPrice: value })
+                          }
+                          computedCompareAtPrice={combinedPrice}
                         />
                         <BlockStack gap="400">
                           <Text as="h2" variant="headingMd">
@@ -1979,6 +2004,11 @@ export default function BundleBuilder() {
                           updateActivePackage({ pricingValue: value })
                         }
                         pricingValueError={pricingValueError}
+                        compareAtPrice={packages[activePackageIndex]?.compareAtPrice ?? ""}
+                        onCompareAtPriceChange={(value) =>
+                          updateActivePackage({ compareAtPrice: value })
+                        }
+                        computedCompareAtPrice={combinedPrice}
                       />
                     )}
                     <PricingSummaryBox
@@ -1989,6 +2019,8 @@ export default function BundleBuilder() {
                       computedBundlePrice={computedBundlePrice}
                       savings={savings}
                       hasMissingPrices={hasMissingPrices}
+                      effectiveCompareAtPrice={effectiveCompareAtPrice}
+                      isCompareAtOverridden={(packages[activePackageIndex]?.compareAtPrice ?? "").trim() !== ""}
                     />
                   </BlockStack>
                 </Card>

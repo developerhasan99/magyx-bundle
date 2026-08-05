@@ -69,6 +69,9 @@ export interface PackageInput {
   position: number;
   pricingType: PricingType;
   pricingValue: number;
+  // Optional override for the computed compare-at price. null = use the
+  // computed one (components summed / pool average x slots).
+  compareAtPrice: number | null;
   freeShipping: boolean;
   // SLOT_BUILDER only: this package's own product pool + slot count — ALL |
   // PRODUCTS scope isn't used here (unlike QUANTITY_BREAKS), just PRODUCTS |
@@ -206,6 +209,7 @@ function packagesCreateData(packages: PackageInput[]) {
     position: pkg.position,
     pricingType: pkg.pricingType,
     pricingValue: pkg.pricingValue,
+    compareAtPrice: pkg.compareAtPrice,
     freeShipping: pkg.freeShipping,
     poolSource: pkg.poolSource,
     slotCount: pkg.slotCount,
@@ -292,6 +296,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         position: pkg.position,
         pricingType: pkg.pricingType,
         pricingValue: pkg.pricingValue,
+        compareAtPrice: pkg.compareAtPrice,
         freeShipping: pkg.freeShipping,
         poolSource: pkg.poolSource,
         slotCount: pkg.slotCount,
@@ -422,6 +427,7 @@ export async function duplicateBundle(shop: string, id: string) {
       position,
       pricingType: pkg.pricingType as PricingType,
       pricingValue: pkg.pricingValue,
+      compareAtPrice: pkg.compareAtPrice,
       freeShipping: pkg.freeShipping,
       poolSource: pkg.poolSource,
       slotCount: pkg.slotCount,

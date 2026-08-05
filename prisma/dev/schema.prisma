@@ -125,6 +125,9 @@ model BundlePackage {
   position         Int                 @default(0)
   pricingType      String              @default("PERCENT_OFF") // FIXED_PRICE | PERCENT_OFF | AMOUNT_OFF
   pricingValue     Float               @default(0)
+  // Optional merchant override for the computed compare-at price. See the
+  // production schema.
+  compareAtPrice   Float?
   freeShipping     Boolean             @default(false)
   shopifyVariantId String?
   // SLOT_BUILDER only: this package's own product pool + slot count,

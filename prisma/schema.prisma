@@ -137,6 +137,13 @@ model BundlePackage {
   position         Int                 @default(0)
   pricingType      String              @default("PERCENT_OFF") // FIXED_PRICE | PERCENT_OFF | AMOUNT_OFF
   pricingValue     Float               @default(0)
+  // Optional merchant override for the strikethrough price. NULL keeps the
+  // computed default: components summed for FIXED, pool average x slot
+  // count for SLOT_BUILDER. Whichever wins is written to the package's
+  // Shopify variant compareAtPrice, so Shopify converts it for every
+  // market exactly as it does the package price — storing a number of our
+  // own and formatting it client-side would ignore currency conversion.
+  compareAtPrice   Float?
   freeShipping     Boolean             @default(false)
   shopifyVariantId String?
   // SLOT_BUILDER only: this package's own product pool + slot count,

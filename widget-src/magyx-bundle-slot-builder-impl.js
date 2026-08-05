@@ -505,10 +505,15 @@ import {
         });
       }
 
-      // Sale price is this package's own (flat) price. The compare-at price
-      // isn't the pool's average (that's the admin editor/checkout-truth
-      // math) — here it's simply the combined price of the first `slotCount`
-      // products in the pool, in whatever order the proxy returned them.
+      /* Sale price is this package's own (flat) price; the compare-at is
+         whatever publish wrote to the package's Shopify variant — the
+         merchant's override if they set one, otherwise the pool average times
+         the slot count — baked into the metafield already filtered down to
+         "actually a saving".
+
+         It used to be summed here from the first `slotCount` pool items,
+         which made this a third calculation that could disagree with both the
+         variant and the editor's preview, and ignored the override. */
       function renderPrice() {
         var pkg = activePackage();
         var salePrice = pkg.price;
@@ -521,18 +526,7 @@ import {
         priceSaleEl.textContent = formatMoney(salePrice, moneyFormat);
 
         var slots = pkg.slotCount || 0;
-        var comparePool = currentPoolItems()
-          .slice(0, slots)
-          .filter(function (item) {
-            return item.price != null;
-          });
-        var comparePrice =
-          comparePool.length > 0
-            ? comparePool.reduce(function (sum, item) {
-                return sum + item.price;
-              }, 0)
-            : null;
-
+        var comparePrice = pkg.compareAtPrice != null ? pkg.compareAtPrice : null;
         var hasSavings = comparePrice != null && comparePrice > salePrice;
         priceCompareEl.hidden = !hasSavings;
         priceSaveEl.hidden = !hasSavings;
