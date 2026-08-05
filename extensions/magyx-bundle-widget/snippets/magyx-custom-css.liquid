@@ -1,0 +1,19 @@
+{%- comment -%}
+  Merchant CSS from the app's Settings page, mirrored into a shop metafield by
+  saveCustomCss. Rendered by every block this app ships, so the setting's
+  promise ("applies to every Magyx Bundle widget") is actually true — it lives
+  in a snippet rather than inline precisely so adding a block can't quietly
+  leave one widget unstyled.
+
+  Emitted after magyx-bundle.css (the schema stylesheet loads in <head>, this
+  renders in the body) so a plain override wins without needing !important.
+
+  `remove: '<'` repeats the sanitiser that runs on save: Liquid doesn't escape
+  output, so a stored `</style><script>` would otherwise break out of this
+  element. `>` is left alone on purpose — it's the child combinator. Renders
+  nothing when unset, so most pages get no extra element.
+{%- endcomment -%}
+{%- assign magyx_custom_css = shop.metafields.magyx_bundle.custom_css.value | remove: '<' -%}
+{%- if magyx_custom_css != blank -%}
+  <style>{{ magyx_custom_css }}</style>
+{%- endif -%}

@@ -175,6 +175,14 @@ model BundleRule {
   collectionIds String @default("[]")
 }
 
+// Shop-wide settings, one row per installed shop. See the production schema.
+model ShopSettings {
+  shop      String   @id
+  customCss String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Session {
   id                  String    @id
   shop                String

@@ -192,6 +192,20 @@ model BundleRule {
   collectionIds String @default("[]")
 }
 
+// Shop-wide settings, one row per installed shop. Kept separate from Bundle
+// so a setting isn't duplicated across every bundle a merchant owns.
+model ShopSettings {
+  shop      String   @id
+  // Merchant-authored CSS appended to the storefront widget's own stylesheet,
+  // for tweaks the app's own settings don't cover. Stored sanitized (see
+  // sanitizeCustomCss) and mirrored into the magyx_bundle.custom_css shop
+  // metafield, which is what the theme block actually reads — the storefront
+  // never queries this table.
+  customCss String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Session {
   id                  String    @id
   shop                String

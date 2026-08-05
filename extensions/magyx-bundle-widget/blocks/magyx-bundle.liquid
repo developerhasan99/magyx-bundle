@@ -30,6 +30,8 @@
 {%- assign slot_data = product.metafields.magyx_bundle.slot_builder.value -%}
 {%- assign fixed_data = product.metafields.magyx_bundle.components.value -%}
 
+{%- render 'magyx-custom-css' -%}
+
 <div class="magyx-bundle-widget" {{ block.shopify_attributes }}>
   {%- if slot_data.bundleId != blank -%}
     {%- comment -%}

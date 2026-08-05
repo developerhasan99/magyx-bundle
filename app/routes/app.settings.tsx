@@ -1,22 +1,73 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { useCallback, useEffect, useState } from "react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { useFetcher, useLoaderData } from "@remix-run/react";
 import {
   Page,
   Layout,
   Card,
   BlockStack,
+  InlineStack,
+  Button,
   Text,
+  TextField,
   List,
   Banner,
 } from "@shopify/polaris";
-import { TitleBar } from "@shopify/app-bridge-react";
+import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
+import { getShopSettings, saveCustomCss } from "../models/shop-settings.server";
+import { CUSTOM_CSS_MAX_LENGTH } from "../utils/custom-css";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-  return null;
+  const { session } = await authenticate.admin(request);
+  return getShopSettings(session.shop);
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { admin, session } = await authenticate.admin(request);
+  const formData = await request.formData();
+  try {
+    // Returns the sanitized text so the form can show what was actually
+    // stored rather than what was typed — otherwise a merchant who pasted
+    // markup would see it persist in the field and assume it took effect.
+    const customCss = await saveCustomCss(
+      admin,
+      session.shop,
+      String(formData.get("customCss") ?? ""),
+    );
+    return { saved: true, customCss, error: null };
+  } catch (error) {
+    return {
+      saved: false,
+      customCss: null,
+      error: error instanceof Error ? error.message : "Couldn't save custom CSS.",
+    };
+  }
 };
 
 export default function Settings() {
+  const { customCss: savedCss } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<typeof action>();
+  const shopify = useAppBridge();
+  const [customCss, setCustomCss] = useState(savedCss);
+  const isSaving = fetcher.state !== "idle";
+
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (fetcher.data.saved) {
+      // Adopt the stored value: sanitizing may have changed what the merchant
+      // typed, and the field should reflect the truth.
+      setCustomCss(fetcher.data.customCss ?? "");
+      shopify.toast.show("Custom CSS saved");
+    }
+  }, [fetcher.state, fetcher.data, shopify]);
+
+  const save = useCallback(() => {
+    fetcher.submit({ customCss }, { method: "POST" });
+  }, [fetcher, customCss]);
+
+  const error = fetcher.data && !fetcher.data.saved ? fetcher.data.error : null;
+
   return (
     <Page>
       <TitleBar title="Settings" />
@@ -66,6 +117,69 @@ export default function Settings() {
                   Cart Transform function on your store. This happens
                   automatically when you release a new app version.
                 </Text>
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+          <Layout.AnnotatedSection
+            title="Custom CSS"
+            description="Fine-tune how the storefront widget looks, beyond the options in each bundle's Storefront section."
+          >
+            <Card>
+              <BlockStack gap="400">
+                {error && (
+                  <Banner tone="critical" title="Couldn't save">
+                    <p>{error}</p>
+                  </Banner>
+                )}
+                <TextField
+                  label="CSS"
+                  labelHidden
+                  value={customCss}
+                  onChange={setCustomCss}
+                  multiline={10}
+                  autoComplete="off"
+                  maxLength={CUSTOM_CSS_MAX_LENGTH}
+                  spellCheck={false}
+                  placeholder={".magyx-slot-builder__slot { border-radius: 4px; }"}
+                  helpText="Applies to every Magyx Bundle widget on your storefront. Loaded after the app's own styles, so a plain rule overrides them without !important."
+                />
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingSm">
+                    Classes you can target
+                  </Text>
+                  <List>
+                    <List.Item>
+                      <code>.magyx-slot-builder</code> — Build a box, with{" "}
+                      <code>__slot</code>, <code>__slot-number</code>,{" "}
+                      <code>__gift-card</code>, <code>__cta</code>
+                    </List.Item>
+                    <List.Item>
+                      <code>.magyx-slot-builder-modal</code> — the product
+                      selection panel
+                    </List.Item>
+                    <List.Item>
+                      <code>.magyx-bundle-contents</code> — the fixed bundle
+                      &ldquo;what&rsquo;s inside&rdquo; list
+                    </List.Item>
+                    <List.Item>
+                      <code>.magyx-quantity-breaks</code> — the pack-size picker
+                    </List.Item>
+                  </List>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Accent colour, heading and layout are per bundle — set those
+                    in the bundle&rsquo;s Storefront section rather than here.
+                  </Text>
+                </BlockStack>
+                <InlineStack align="end">
+                  <Button
+                    variant="primary"
+                    loading={isSaving}
+                    disabled={customCss === savedCss}
+                    onClick={save}
+                  >
+                    Save
+                  </Button>
+                </InlineStack>
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
