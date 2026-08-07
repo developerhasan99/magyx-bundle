@@ -11,6 +11,7 @@ import {
   Divider,
 } from "@shopify/polaris";
 import {
+  DESCRIPTION_TEXT_KEY,
   HEADING_TEXT_KEY,
   ITEM_SUBTEXT_TEXT_KEY,
   SLOT_BUILDER_TEXT_DEFAULTS,
@@ -49,6 +50,7 @@ export function TranslationsSection({
   translations,
   setTranslations,
   widgetHeading,
+  widgetDescription,
   itemSubtextTemplate,
   packages,
   updatePackage,
@@ -58,6 +60,8 @@ export function TranslationsSection({
   setTranslations: (value: SlotBuilderTranslations) => void;
   /** Primary-language heading, shown as the placeholder for its overrides. */
   widgetHeading: string;
+  /** Primary-language description line, likewise. */
+  widgetDescription: string;
   /** Primary-language subtext template, likewise. */
   itemSubtextTemplate: string;
   packages: PackageState[];
@@ -152,13 +156,17 @@ export function TranslationsSection({
   // The subtext only counts where there's a template to translate — a bundle
   // that doesn't use one shouldn't be permanently one short of finished.
   const countsSubtext = !isPrimarySelected && itemSubtextTemplate.trim() !== "";
+  // Same rule for the description line, which is optional in the same way.
+  const countsDescription = !isPrimarySelected && widgetDescription.trim() !== "";
   const filledCount =
     SLOT_BUILDER_TEXT_FIELDS.filter((f) => localeStrings[f.key]?.trim()).length +
     (!isPrimarySelected && localeStrings[HEADING_TEXT_KEY]?.trim() ? 1 : 0) +
+    (countsDescription && localeStrings[DESCRIPTION_TEXT_KEY]?.trim() ? 1 : 0) +
     (countsSubtext && localeStrings[ITEM_SUBTEXT_TEXT_KEY]?.trim() ? 1 : 0);
   const totalCount =
     SLOT_BUILDER_TEXT_FIELDS.length +
     (isPrimarySelected ? 0 : 1) +
+    (countsDescription ? 1 : 0) +
     (countsSubtext ? 1 : 0);
 
   return (
@@ -203,7 +211,7 @@ export function TranslationsSection({
       {!isPrimarySelected && (
       <BlockStack gap="300">
         <Text as="h3" variant="headingSm">
-          Heading
+          Heading &amp; description
         </Text>
         <TextField
           label="Widget heading"
@@ -216,6 +224,20 @@ export function TranslationsSection({
             widgetHeading
               ? undefined
               : "Set a heading in Storefront before translating it."
+          }
+        />
+        <TextField
+          label="Description"
+          value={localeStrings[DESCRIPTION_TEXT_KEY] ?? ""}
+          onChange={(value) => setString(DESCRIPTION_TEXT_KEY, value)}
+          placeholder={widgetDescription || "Not set"}
+          autoComplete="off"
+          multiline={2}
+          disabled={!widgetDescription.trim()}
+          helpText={
+            widgetDescription.trim()
+              ? undefined
+              : "Set a description in Storefront before translating it."
           }
         />
       </BlockStack>

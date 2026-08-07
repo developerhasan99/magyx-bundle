@@ -302,6 +302,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       shopifyProductId: bundle.shopifyProductId,
       widgetStyle: bundle.widgetStyle,
       widgetHeading: bundle.widgetHeading,
+      widgetDescription: bundle.widgetDescription,
       accentColor: bundle.accentColor,
       showPrices: bundle.showPrices,
       skipCart: bundle.skipCart,
@@ -592,6 +593,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           ),
           widgetSettings: {
             heading: bundle.widgetHeading,
+            description: bundle.widgetDescription,
             accentColor: bundle.accentColor,
             showPrices: bundle.showPrices,
             skipCart: bundle.skipCart,
@@ -669,6 +671,9 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
     // contents) — Bundle Builder has nothing "inside" until the customer
     // picks, so a new one starts with no heading unless the merchant sets one.
     widgetHeading: bundle?.widgetHeading ?? (type === "SLOT_BUILDER" ? "" : "What's inside"),
+    // Build a Box only, and opt-in there too — nothing renders until the
+    // merchant writes a line.
+    widgetDescription: bundle?.widgetDescription ?? "",
     accentColor: bundle?.accentColor ?? "#1a1a1a",
     showPrices: bundle?.showPrices ?? false,
     skipCart: bundle?.skipCart ?? false,
@@ -809,6 +814,9 @@ export default function BundleBuilder() {
   const [pricingValue, setPricingValue] = useState(initialForm.pricingValue);
   const [widgetStyle, setWidgetStyle] = useState(initialForm.widgetStyle);
   const [widgetHeading, setWidgetHeading] = useState(initialForm.widgetHeading);
+  const [widgetDescription, setWidgetDescription] = useState(
+    initialForm.widgetDescription,
+  );
   const [accentColor, setAccentColor] = useState(initialForm.accentColor);
   const [showPrices, setShowPrices] = useState(initialForm.showPrices);
   const [skipCart, setSkipCart] = useState(initialForm.skipCart);
@@ -1148,7 +1156,8 @@ export default function BundleBuilder() {
     () =>
       JSON.stringify({
         title, type, status, pricingType, pricingValue, widgetStyle,
-        widgetHeading, accentColor, showPrices, skipCart, autoCheckout, poolMode,
+        widgetHeading, widgetDescription, accentColor, showPrices, skipCart,
+        autoCheckout, poolMode,
         itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations, items,
         packages: stripCollectionPoolItems(packages),
         collections, collectionPoolItems, poolSource,
@@ -1160,7 +1169,8 @@ export default function BundleBuilder() {
       }),
     [
       initialForm, title, type, status, pricingType, pricingValue,
-      widgetStyle, widgetHeading, accentColor, showPrices, skipCart, autoCheckout,
+      widgetStyle, widgetHeading, widgetDescription, accentColor, showPrices,
+      skipCart, autoCheckout,
       poolMode, itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations,
       items, packages, collections,
       collectionPoolItems, poolSource,
@@ -1183,6 +1193,7 @@ export default function BundleBuilder() {
       setPricingValue(form.pricingValue);
       setWidgetStyle(form.widgetStyle);
       setWidgetHeading(form.widgetHeading);
+      setWidgetDescription(form.widgetDescription);
       setAccentColor(form.accentColor);
       setShowPrices(form.showPrices);
       setSkipCart(form.skipCart);
@@ -1626,6 +1637,8 @@ export default function BundleBuilder() {
       pricingValue: parseFloat(pricingValue) || 0,
       widgetStyle,
       widgetHeading,
+      // Only Build a Box renders it — every other type would carry dead copy.
+      widgetDescription: type === "SLOT_BUILDER" ? widgetDescription : "",
       accentColor,
       showPrices,
       skipCart,
@@ -1737,7 +1750,8 @@ export default function BundleBuilder() {
     );
   }, [
     fetcher, title, description, type, status, pricingType, pricingValue,
-    widgetStyle, widgetHeading, accentColor, showPrices, skipCart, autoCheckout,
+    widgetStyle, widgetHeading, widgetDescription, accentColor, showPrices,
+    skipCart, autoCheckout,
     poolMode, itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations, items,
     packages, minItems, maxItems,
     tiers, poolSource, collections, qbTiers,
@@ -2170,6 +2184,8 @@ export default function BundleBuilder() {
                     setAccentColor={setAccentColor}
                     widgetHeading={widgetHeading}
                     setWidgetHeading={setWidgetHeading}
+                    widgetDescription={widgetDescription}
+                    setWidgetDescription={setWidgetDescription}
                     showPrices={showPrices}
                     setShowPrices={setShowPrices}
                     itemSubtextTemplate={itemSubtextTemplate}
@@ -2191,6 +2207,7 @@ export default function BundleBuilder() {
                     translations={translations}
                     setTranslations={setTranslations}
                     widgetHeading={widgetHeading}
+                    widgetDescription={widgetDescription}
                     itemSubtextTemplate={itemSubtextTemplate}
                     packages={packages}
                     updatePackage={updatePackageAt}

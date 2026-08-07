@@ -25,6 +25,9 @@ model Bundle {
   // Storefront "what's inside" widget appearance (FIXED bundles only)
   widgetStyle     String       @default("numbered") // numbered | grid | minimal
   widgetHeading   String       @default("What's inside")
+  // SLOT_BUILDER only: supporting copy under the widget's progress line. See
+  // the production schema.
+  widgetDescription String     @default("")
   accentColor     String       @default("#1a1a1a")
   showPrices      Boolean      @default(false)
   // SLOT_BUILDER only: skip the cart entirely and send the customer straight

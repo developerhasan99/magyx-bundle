@@ -61,6 +61,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     pricingValue: 0,
     widgetStyle: "numbered",
     widgetHeading: type === "SLOT_BUILDER" ? "" : "What's inside",
+    widgetDescription: "",
     accentColor: "#1a1a1a",
     showPrices: false,
     skipCart: false,

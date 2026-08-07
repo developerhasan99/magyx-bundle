@@ -1783,6 +1783,8 @@ interface SlotBuilderPublishInput {
   packages: SlotBuilderPackageInput[];
   widgetSettings: {
     heading: string;
+    /** Supporting line under the widget's progress text. "" hides it. */
+    description: string;
     accentColor: string;
     showPrices: boolean;
     skipCart: boolean;
@@ -1793,8 +1795,8 @@ interface SlotBuilderPublishInput {
     showSubtextOnGifts: boolean;
   };
   // Widget copy the merchant translated, by locale then string key (see
-  // app/utils/slot-builder-text.ts). The reserved "heading" key holds
-  // per-locale versions of `widgetSettings.heading`.
+  // app/utils/slot-builder-text.ts). The reserved "heading" and "description"
+  // keys hold per-locale versions of the same-named `widgetSettings` fields.
   translations: SlotBuilderTranslations;
   // The shop's primary storefront locale — the widget falls back to this
   // bucket before falling back to its own built-in English defaults, so a
@@ -2267,9 +2269,10 @@ export async function publishSlotBuilderBundleProduct(
       bundleId: input.bundleId,
       settings: {
         ...input.widgetSettings,
-        // Storefront copy the merchant translated. `heading` lives inside
-        // `text` per locale rather than beside `settings.heading` so the
-        // widget resolves it through the same lookup as every other string.
+        // Storefront copy the merchant translated. `heading`/`description`
+        // live inside `text` per locale rather than beside their
+        // `settings.*` twins so the widget resolves them through the same
+        // lookup as every other string.
         primaryLocale: input.primaryLocale,
         text: pruneTranslations(input.translations),
       },

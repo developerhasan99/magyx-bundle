@@ -82,6 +82,12 @@ export type SlotBuilderTextKey = keyof typeof SLOT_BUILDER_TEXT_DEFAULTS;
 export const HEADING_TEXT_KEY = "heading";
 
 /** Reserved key holding per-locale versions of the bundle's
+    `widgetDescription` — the line under the progress text. Resolved exactly
+    like HEADING_TEXT_KEY: the merchant's own copy is the fallback, not a
+    built-in string, so it isn't in the defaults above either. */
+export const DESCRIPTION_TEXT_KEY = "description";
+
+/** Reserved key holding per-locale versions of the bundle's
     `itemSubtextTemplate`. Unlike every other key here this one never reaches
     the widget: it's a template ("{{sku}} · {{metafield:custom.material}}"),
     and the server resolves it against each product before publishing, so the

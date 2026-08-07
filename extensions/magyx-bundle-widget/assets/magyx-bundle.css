@@ -982,6 +982,18 @@
   color: var(--bc-accent);
 }
 
+/* Optional supporting line under the progress text. Same muted, slightly
+   smaller treatment as an item's subtext — but it wraps instead of
+   truncating, since it's a sentence rather than a one-line label. The
+   negative top margin eats into the progress line's own 10px so the two read
+   as one block, and the bottom margin restores the gap to the slots. */
+.magyx-slot-builder__description {
+  margin: -6px 0 12px;
+  opacity: 0.6;
+  font-size: 0.85em;
+  line-height: 1.45;
+}
+
 .magyx-slot-builder__slots {
   display: flex;
   flex-direction: column;

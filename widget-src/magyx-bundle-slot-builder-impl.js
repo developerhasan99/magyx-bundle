@@ -376,6 +376,16 @@ import {
       }
       html +=
         '<div class="magyx-slot-builder__progress" data-sb="progress"></div>';
+      // Supporting copy under the progress line — same reserved-key treatment
+      // as `heading` above, and like it, absent markup rather than an empty
+      // element when the merchant hasn't written one.
+      var descriptionText = t("description") || settings.description || "";
+      if (descriptionText) {
+        html +=
+          '<p class="magyx-slot-builder__description">' +
+          escapeHtml(descriptionText) +
+          "</p>";
+      }
       // One row per slot, filled or empty — the empty rows are themselves the
       // way into the picker, so there's no separate "Add items" button.
       html += '<div class="magyx-slot-builder__slots" data-sb="slots"></div>';

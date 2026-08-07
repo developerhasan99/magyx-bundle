@@ -101,6 +101,8 @@ export interface BundleInput {
   // Storefront "what's inside" widget appearance (FIXED bundles only)
   widgetStyle: WidgetStyle;
   widgetHeading: string;
+  // SLOT_BUILDER only: the supporting line under the widget's progress text
+  widgetDescription: string;
   accentColor: string;
   showPrices: boolean;
   // SLOT_BUILDER only: skip the cart and go straight to checkout after adding
@@ -233,6 +235,7 @@ export async function createBundle(shop: string, input: BundleInput) {
       pricingValue: input.pricingValue,
       widgetStyle: input.widgetStyle,
       widgetHeading: input.widgetHeading,
+      widgetDescription: input.widgetDescription,
       accentColor: input.accentColor,
       showPrices: input.showPrices,
       skipCart: input.skipCart,
@@ -329,6 +332,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         pricingValue: input.pricingValue,
         widgetStyle: input.widgetStyle,
         widgetHeading: input.widgetHeading,
+        widgetDescription: input.widgetDescription,
         accentColor: input.accentColor,
         showPrices: input.showPrices,
         skipCart: input.skipCart,
@@ -399,6 +403,7 @@ export async function duplicateBundle(shop: string, id: string) {
     pricingValue: source.pricingValue,
     widgetStyle: source.widgetStyle as WidgetStyle,
     widgetHeading: source.widgetHeading,
+    widgetDescription: source.widgetDescription,
     accentColor: source.accentColor,
     showPrices: source.showPrices,
     skipCart: source.skipCart,

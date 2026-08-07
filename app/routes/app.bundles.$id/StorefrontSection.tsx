@@ -25,6 +25,8 @@ export function StorefrontSection({
   setAccentColor,
   widgetHeading,
   setWidgetHeading,
+  widgetDescription,
+  setWidgetDescription,
   showPrices,
   setShowPrices,
   itemSubtextTemplate,
@@ -43,6 +45,9 @@ export function StorefrontSection({
   setAccentColor: (value: string) => void;
   widgetHeading: string;
   setWidgetHeading: (value: string) => void;
+  /** SLOT_BUILDER only — the "what's inside" widget has nowhere to show it. */
+  widgetDescription: string;
+  setWidgetDescription: (value: string) => void;
   showPrices: boolean;
   setShowPrices: (value: boolean) => void;
   itemSubtextTemplate: string;
@@ -114,6 +119,19 @@ export function StorefrontSection({
           </div>
           <AccentColorPicker accentColor={accentColor} onChange={setAccentColor} />
         </InlineStack>
+        {/* Build a box only — the “what's inside” widget is a list with no
+            room for a supporting line, so the field would be dead UI there. */}
+        {isSlotBuilder && (
+          <TextField
+            label="Description"
+            value={widgetDescription}
+            onChange={setWidgetDescription}
+            autoComplete="off"
+            multiline={2}
+            placeholder="e.g. Mix and match any 4 flavours — swap them any time."
+            helpText="Optional line shown under “Choose 2 more products”. Leave empty to hide it."
+          />
+        )}
       </BlockStack>
 
       <Divider />
