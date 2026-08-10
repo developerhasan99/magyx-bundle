@@ -872,6 +872,19 @@
   margin: 0 0 16px;
 }
 
+/* One money value substituted into a merchant's price template — the same
+   markup whether it landed in a pack tab or the per-item line, so a
+   compare-at reads as struck through in both places. Sizing stays with
+   whichever line it's in; these only carry the was/now distinction. */
+.magyx-slot-builder__money--compare {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.magyx-slot-builder__money--sale {
+  font-weight: 600;
+}
+
 /* Centred, with a rule running out to each edge. The rules are pseudo-
    elements rather than a border on the row, so they stop short of the text
    instead of running behind it, and `flex: 1` keeps them symmetrical at any
@@ -942,8 +955,14 @@
   line-height: 1.4;
 }
 
+/* Rendered from the merchant's shortcode template, so the spans sit inline
+   in normal flow rather than as flex items — the spacing between them is
+   whatever they typed around the shortcodes, and a long line wraps at those
+   same spaces instead of overflowing the tab. */
 .magyx-slot-builder__pack-tab-price {
+  text-align: center;
   font-size: 12px;
+  line-height: 1.4;
   opacity: 0.65;
 }
 

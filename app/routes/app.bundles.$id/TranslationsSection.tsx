@@ -13,6 +13,8 @@ import {
 import {
   DESCRIPTION_TEXT_KEY,
   HEADING_TEXT_KEY,
+  PACK_PRICE_TEXT_KEY,
+  PRICE_PER_UNIT_TEXT_KEY,
   ITEM_SUBTEXT_TEXT_KEY,
   SLOT_BUILDER_TEXT_DEFAULTS,
   SLOT_BUILDER_TEXT_FIELDS,
@@ -51,6 +53,8 @@ export function TranslationsSection({
   setTranslations,
   widgetHeading,
   widgetDescription,
+  packPriceTemplate,
+  pricePerUnitTemplate,
   itemSubtextTemplate,
   packages,
   updatePackage,
@@ -62,6 +66,11 @@ export function TranslationsSection({
   widgetHeading: string;
   /** Primary-language description line, likewise. */
   widgetDescription: string;
+  /** Primary-language package tab price template, likewise. */
+  packPriceTemplate: string;
+  /** Primary-language per-item line, likewise — but this one is a normal
+      catalogue key, so it's edited in its own group below rather than here. */
+  pricePerUnitTemplate: string;
   /** Primary-language subtext template, likewise. */
   itemSubtextTemplate: string;
   packages: PackageState[];
@@ -158,15 +167,20 @@ export function TranslationsSection({
   const countsSubtext = !isPrimarySelected && itemSubtextTemplate.trim() !== "";
   // Same rule for the description line, which is optional in the same way.
   const countsDescription = !isPrimarySelected && widgetDescription.trim() !== "";
+  // And for the pack tab price line — see the field itself for why a blank
+  // one (i.e. the built-in all-shortcodes default) has nothing to translate.
+  const countsPackPrice = !isPrimarySelected && packPriceTemplate.trim() !== "";
   const filledCount =
     SLOT_BUILDER_TEXT_FIELDS.filter((f) => localeStrings[f.key]?.trim()).length +
     (!isPrimarySelected && localeStrings[HEADING_TEXT_KEY]?.trim() ? 1 : 0) +
     (countsDescription && localeStrings[DESCRIPTION_TEXT_KEY]?.trim() ? 1 : 0) +
+    (countsPackPrice && localeStrings[PACK_PRICE_TEXT_KEY]?.trim() ? 1 : 0) +
     (countsSubtext && localeStrings[ITEM_SUBTEXT_TEXT_KEY]?.trim() ? 1 : 0);
   const totalCount =
     SLOT_BUILDER_TEXT_FIELDS.length +
     (isPrimarySelected ? 0 : 1) +
     (countsDescription ? 1 : 0) +
+    (countsPackPrice ? 1 : 0) +
     (countsSubtext ? 1 : 0);
 
   return (
@@ -211,7 +225,7 @@ export function TranslationsSection({
       {!isPrimarySelected && (
       <BlockStack gap="300">
         <Text as="h3" variant="headingSm">
-          Heading &amp; description
+          Heading, description &amp; package price
         </Text>
         <TextField
           label="Widget heading"
@@ -238,6 +252,22 @@ export function TranslationsSection({
             widgetDescription.trim()
               ? undefined
               : "Set a description in Storefront before translating it."
+          }
+        />
+        {/* Only worth translating once the merchant has written their own
+            template — the built-in default is pure shortcodes, so it renders
+            the same money in every language and has no words to translate. */}
+        <TextField
+          label="Package tab price"
+          value={localeStrings[PACK_PRICE_TEXT_KEY] ?? ""}
+          onChange={(value) => setString(PACK_PRICE_TEXT_KEY, value)}
+          placeholder={packPriceTemplate || "Not set"}
+          autoComplete="off"
+          disabled={!packPriceTemplate.trim()}
+          helpText={
+            packPriceTemplate.trim()
+              ? "Keep the shortcodes — only the words around them need translating."
+              : "Set a price line in Storefront before translating it."
           }
         />
       </BlockStack>
@@ -336,7 +366,15 @@ export function TranslationsSection({
                 label={field.label}
                 value={localeStrings[field.key] ?? ""}
                 onChange={(value) => setString(field.key, value)}
-                placeholder={SLOT_BUILDER_TEXT_DEFAULTS[field.key]}
+                /* Every other key falls back to the app's own English, so
+                   the default is the honest placeholder. `pricePerUnit` has
+                   none: what a blank field falls back to is whatever the
+                   merchant wrote in Storefront. */
+                placeholder={
+                  field.key === PRICE_PER_UNIT_TEXT_KEY
+                    ? pricePerUnitTemplate || "Not set — the line is hidden"
+                    : SLOT_BUILDER_TEXT_DEFAULTS[field.key]
+                }
                 autoComplete="off"
                 helpText={field.help}
               />

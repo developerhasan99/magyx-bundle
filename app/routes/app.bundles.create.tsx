@@ -6,6 +6,7 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { createBundle, type BundleType } from "../models/bundle.server";
 import { BundleTypeCard } from "../components/BundleTypeCard";
+import { PRICE_PER_UNIT_TEMPLATE_DEFAULT } from "../utils/slot-builder-text";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -62,6 +63,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     widgetStyle: "numbered",
     widgetHeading: type === "SLOT_BUILDER" ? "" : "What's inside",
     widgetDescription: "",
+    packPriceTemplate: "",
+    pricePerUnitTemplate: PRICE_PER_UNIT_TEMPLATE_DEFAULT,
     accentColor: "#1a1a1a",
     showPrices: false,
     skipCart: false,

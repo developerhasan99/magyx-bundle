@@ -40,6 +40,7 @@ import {
 } from "../../models/shopify-sync.server";
 import {
   parseTranslations,
+  PRICE_PER_UNIT_TEMPLATE_DEFAULT,
   type PackageTranslations,
   type SlotBuilderTranslations,
 } from "../../utils/slot-builder-text";
@@ -303,6 +304,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       widgetStyle: bundle.widgetStyle,
       widgetHeading: bundle.widgetHeading,
       widgetDescription: bundle.widgetDescription,
+      packPriceTemplate: bundle.packPriceTemplate,
+      pricePerUnitTemplate: bundle.pricePerUnitTemplate,
       accentColor: bundle.accentColor,
       showPrices: bundle.showPrices,
       skipCart: bundle.skipCart,
@@ -594,6 +597,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           widgetSettings: {
             heading: bundle.widgetHeading,
             description: bundle.widgetDescription,
+            packPriceTemplate: bundle.packPriceTemplate,
+            pricePerUnitTemplate: bundle.pricePerUnitTemplate,
             accentColor: bundle.accentColor,
             showPrices: bundle.showPrices,
             skipCart: bundle.skipCart,
@@ -674,6 +679,13 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
     // Build a Box only, and opt-in there too — nothing renders until the
     // merchant writes a line.
     widgetDescription: bundle?.widgetDescription ?? "",
+    // Likewise opt-in: empty means the widget renders its own default
+    // template (per-item compare-at, then per-item price).
+    packPriceTemplate: bundle?.packPriceTemplate ?? "",
+    // Unlike the two above this one starts with real copy — clearing it is
+    // how you hide the line, so "" has to mean "hidden", not "unset".
+    pricePerUnitTemplate:
+      bundle?.pricePerUnitTemplate ?? PRICE_PER_UNIT_TEMPLATE_DEFAULT,
     accentColor: bundle?.accentColor ?? "#1a1a1a",
     showPrices: bundle?.showPrices ?? false,
     skipCart: bundle?.skipCart ?? false,
@@ -816,6 +828,12 @@ export default function BundleBuilder() {
   const [widgetHeading, setWidgetHeading] = useState(initialForm.widgetHeading);
   const [widgetDescription, setWidgetDescription] = useState(
     initialForm.widgetDescription,
+  );
+  const [packPriceTemplate, setPackPriceTemplate] = useState(
+    initialForm.packPriceTemplate,
+  );
+  const [pricePerUnitTemplate, setPricePerUnitTemplate] = useState(
+    initialForm.pricePerUnitTemplate,
   );
   const [accentColor, setAccentColor] = useState(initialForm.accentColor);
   const [showPrices, setShowPrices] = useState(initialForm.showPrices);
@@ -1156,7 +1174,8 @@ export default function BundleBuilder() {
     () =>
       JSON.stringify({
         title, type, status, pricingType, pricingValue, widgetStyle,
-        widgetHeading, widgetDescription, accentColor, showPrices, skipCart,
+        widgetHeading, widgetDescription, packPriceTemplate, pricePerUnitTemplate,
+        accentColor, showPrices, skipCart,
         autoCheckout, poolMode,
         itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations, items,
         packages: stripCollectionPoolItems(packages),
@@ -1169,8 +1188,8 @@ export default function BundleBuilder() {
       }),
     [
       initialForm, title, type, status, pricingType, pricingValue,
-      widgetStyle, widgetHeading, widgetDescription, accentColor, showPrices,
-      skipCart, autoCheckout,
+      widgetStyle, widgetHeading, widgetDescription, packPriceTemplate,
+      pricePerUnitTemplate, accentColor, showPrices, skipCart, autoCheckout,
       poolMode, itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations,
       items, packages, collections,
       collectionPoolItems, poolSource,
@@ -1194,6 +1213,8 @@ export default function BundleBuilder() {
       setWidgetStyle(form.widgetStyle);
       setWidgetHeading(form.widgetHeading);
       setWidgetDescription(form.widgetDescription);
+      setPackPriceTemplate(form.packPriceTemplate);
+      setPricePerUnitTemplate(form.pricePerUnitTemplate);
       setAccentColor(form.accentColor);
       setShowPrices(form.showPrices);
       setSkipCart(form.skipCart);
@@ -1639,6 +1660,9 @@ export default function BundleBuilder() {
       widgetHeading,
       // Only Build a Box renders it — every other type would carry dead copy.
       widgetDescription: type === "SLOT_BUILDER" ? widgetDescription : "",
+      // Only Build a Box has pack tabs to render it in.
+      packPriceTemplate: type === "SLOT_BUILDER" ? packPriceTemplate : "",
+      pricePerUnitTemplate: type === "SLOT_BUILDER" ? pricePerUnitTemplate : "",
       accentColor,
       showPrices,
       skipCart,
@@ -1750,8 +1774,8 @@ export default function BundleBuilder() {
     );
   }, [
     fetcher, title, description, type, status, pricingType, pricingValue,
-    widgetStyle, widgetHeading, widgetDescription, accentColor, showPrices,
-    skipCart, autoCheckout,
+    widgetStyle, widgetHeading, widgetDescription, packPriceTemplate,
+    pricePerUnitTemplate, accentColor, showPrices, skipCart, autoCheckout,
     poolMode, itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations, items,
     packages, minItems, maxItems,
     tiers, poolSource, collections, qbTiers,
@@ -2186,6 +2210,10 @@ export default function BundleBuilder() {
                     setWidgetHeading={setWidgetHeading}
                     widgetDescription={widgetDescription}
                     setWidgetDescription={setWidgetDescription}
+                    packPriceTemplate={packPriceTemplate}
+                    setPackPriceTemplate={setPackPriceTemplate}
+                    pricePerUnitTemplate={pricePerUnitTemplate}
+                    setPricePerUnitTemplate={setPricePerUnitTemplate}
                     showPrices={showPrices}
                     setShowPrices={setShowPrices}
                     itemSubtextTemplate={itemSubtextTemplate}
@@ -2208,6 +2236,8 @@ export default function BundleBuilder() {
                     setTranslations={setTranslations}
                     widgetHeading={widgetHeading}
                     widgetDescription={widgetDescription}
+                    packPriceTemplate={packPriceTemplate}
+                    pricePerUnitTemplate={pricePerUnitTemplate}
                     itemSubtextTemplate={itemSubtextTemplate}
                     packages={packages}
                     updatePackage={updatePackageAt}

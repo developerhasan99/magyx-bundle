@@ -10,6 +10,11 @@ import {
 import { WidgetStyleCard } from "./WidgetStyleCard";
 import { AccentColorPicker } from "./AccentColorPicker";
 import { WIDGET_STYLE_OPTIONS } from "./types";
+import {
+  PACK_PRICE_TEMPLATE_DEFAULT,
+  PRICE_PER_UNIT_TEMPLATE_DEFAULT,
+  PRICE_PLACEHOLDERS,
+} from "../../utils/slot-builder-text";
 
 // Everything about how this bundle behaves on the storefront, for the two
 // types that publish a product page widget: FIXED ("what's inside") and
@@ -27,6 +32,10 @@ export function StorefrontSection({
   setWidgetHeading,
   widgetDescription,
   setWidgetDescription,
+  packPriceTemplate,
+  setPackPriceTemplate,
+  pricePerUnitTemplate,
+  setPricePerUnitTemplate,
   showPrices,
   setShowPrices,
   itemSubtextTemplate,
@@ -48,6 +57,12 @@ export function StorefrontSection({
   /** SLOT_BUILDER only — the "what's inside" widget has nowhere to show it. */
   widgetDescription: string;
   setWidgetDescription: (value: string) => void;
+  /** SLOT_BUILDER only — likewise: nothing else renders package tabs. */
+  packPriceTemplate: string;
+  setPackPriceTemplate: (value: string) => void;
+  /** SLOT_BUILDER only — "" hides the per-item line rather than defaulting. */
+  pricePerUnitTemplate: string;
+  setPricePerUnitTemplate: (value: string) => void;
   showPrices: boolean;
   setShowPrices: (value: boolean) => void;
   itemSubtextTemplate: string;
@@ -133,6 +148,51 @@ export function StorefrontSection({
           />
         )}
       </BlockStack>
+
+      {/* Build a box only — no other type renders package tabs or a per-item
+          line. Shown even for a single-package bundle (where the widget draws
+          no tabs at all) rather than appearing and disappearing as packages
+          are added on the other tab, which reads as a bug. */}
+      {isSlotBuilder && (
+        <>
+          <Divider />
+          <BlockStack gap="300">
+            <Text as="h3" variant="headingSm">
+              Prices
+            </Text>
+            {/* One shared explanation rather than the same list repeated in
+                both fields' help text — they take the same shortcodes and
+                resolve them against the package the shopper is on. */}
+            <Text as="p" variant="bodySm" tone="subdued">
+              Both lines take the same shortcodes:{" "}
+              {PRICE_PLACEHOLDERS.map((p, i) => (
+                <span key={p.token}>
+                  {i > 0 ? ", " : ""}
+                  {p.token} ({p.label})
+                </span>
+              ))}
+              . Compare-at prices render struck through, and disappear on a
+              package that isn&apos;t actually a saving.
+            </Text>
+            <TextField
+              label="Package tab price"
+              value={packPriceTemplate}
+              onChange={setPackPriceTemplate}
+              autoComplete="off"
+              placeholder={`e.g. ${PACK_PRICE_TEMPLATE_DEFAULT} / bottle`}
+              helpText={`Shown inside each package tab. Leave empty for “${PACK_PRICE_TEMPLATE_DEFAULT}”.`}
+            />
+            <TextField
+              label="Price per item"
+              value={pricePerUnitTemplate}
+              onChange={setPricePerUnitTemplate}
+              autoComplete="off"
+              placeholder={`e.g. ${PRICE_PER_UNIT_TEMPLATE_DEFAULT}`}
+              helpText="Shown under the bundle's total price. Leave empty to hide the line."
+            />
+          </BlockStack>
+        </>
+      )}
 
       <Divider />
 

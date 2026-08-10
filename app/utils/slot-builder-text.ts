@@ -42,7 +42,14 @@ export const SLOT_BUILDER_TEXT_DEFAULTS = {
   progressChoose_other: "Choose {count} more products",
   progressComplete: "{count} of {total} selected",
   priceSave: "Save {percent}%",
-  pricePerUnit: "That's only {amount} per item.",
+  /* The only key with no built-in copy: its primary-language source is the
+     bundle's own `pricePerUnitTemplate` (Storefront tab), so that a merchant
+     who clears the field gets no line at all — a default here would keep
+     re-rendering the line they just deleted. Still listed in the fields below
+     so the Translations tab can override it per language like any other
+     string; see PRICE_PER_UNIT_TEMPLATE_DEFAULT for the copy new bundles
+     start with. */
+  pricePerUnit: "",
 
   modalTitleReady: "Your bundle is ready!",
   modalTitle_one: "Add {count} more product",
@@ -86,6 +93,50 @@ export const HEADING_TEXT_KEY = "heading";
     like HEADING_TEXT_KEY: the merchant's own copy is the fallback, not a
     built-in string, so it isn't in the defaults above either. */
 export const DESCRIPTION_TEXT_KEY = "description";
+
+/** Reserved key holding per-locale versions of the bundle's
+    `packPriceTemplate` — the price line inside each package tab. Resolved
+    exactly like HEADING_TEXT_KEY, and like it the merchant's own template is
+    the fallback rather than a built-in string, so it isn't in the defaults
+    above either. */
+export const PACK_PRICE_TEXT_KEY = "packPrice";
+
+/** What a package tab shows when the merchant hasn't written a template:
+    the per-item compare-at price struck through, then the per-item price.
+    Kept here rather than inline in the widget so the admin can show the same
+    thing as the field's placeholder. */
+export const PACK_PRICE_TEMPLATE_DEFAULT =
+  "{per_item_compare_at_price} {per_item_price}";
+
+/** The `pricePerUnit` key, for the admin — its primary-language copy comes
+    from the bundle's `pricePerUnitTemplate` rather than from the defaults
+    above, so the Translations tab has to show that as the placeholder. */
+export const PRICE_PER_UNIT_TEXT_KEY: SlotBuilderTextKey = "pricePerUnit";
+
+/** The per-item line new bundles start with, and what existing ones were
+    backfilled to — deliberately the same sentence the widget hard-defaulted
+    to before this became a field, so upgrading a shop doesn't change what its
+    storefront says. */
+export const PRICE_PER_UNIT_TEMPLATE_DEFAULT =
+  "That's only {per_item_price} per item.";
+
+/* Shortcodes accepted in the two price templates — `packPriceTemplate` and
+   `pricePerUnitTemplate` — with the admin-facing description of each.
+   `per_item_*` are the package price divided by its slot count — the "per
+   bottle" figure that makes a bigger pack look like the better deal;
+   `package_*` are the pack totals. Both resolve against the package the
+   shopper is currently on.
+
+   Either compare-at shortcode renders as nothing when the package has no
+   compare-at price, or has one that isn't actually higher than what the
+   shopper pays — the same "actually a saving" rule the total under the tabs
+   uses, so neither line can advertise a discount that doesn't exist. */
+export const PRICE_PLACEHOLDERS: { token: string; label: string }[] = [
+  { token: "{per_item_price}", label: "price per item" },
+  { token: "{per_item_compare_at_price}", label: "compare-at price per item" },
+  { token: "{package_price}", label: "price for the whole package" },
+  { token: "{package_compare_at_price}", label: "compare-at price for the whole package" },
+];
 
 /** Reserved key holding per-locale versions of the bundle's
     `itemSubtextTemplate`. Unlike every other key here this one never reaches
@@ -178,7 +229,17 @@ export const SLOT_BUILDER_TEXT_FIELDS: SlotBuilderTextField[] = [
     label: "Savings",
     help: "{percent} is how much cheaper the bundle is than buying separately. Use {amount} instead to show the money saved.",
   },
-  { key: "pricePerUnit", group: "Progress", label: "Price per item" },
+  {
+    key: "pricePerUnit",
+    group: "Progress",
+    // Shortcodes spelled out rather than built from PRICE_PLACEHOLDERS: a
+    // function call in this array's initializer isn't provably side-effect
+    // free, which would keep the whole (admin-only) array — and every label
+    // and help string in it — in the storefront bundle. Same reason
+    // slotBuilderTextGroups() is a function instead of a top-level reduce.
+    label: "Price per item",
+    help: "Keep the shortcodes — only the words around them need translating. Insert {per_item_price}, {per_item_compare_at_price}, {package_price}, {package_compare_at_price}. Blank here and in Storefront hides the line.",
+  },
 
   { key: "modalTitleReady", group: "Selection panel", label: "Panel title — box complete" },
   { key: "modalTitle_one", group: "Selection panel", label: "Panel title — 1 slot left" },

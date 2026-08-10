@@ -32,6 +32,19 @@ model Bundle {
   // versions live in `translations` under the reserved "description" key,
   // exactly as `widgetHeading` does.
   widgetDescription String     @default("")
+  // SLOT_BUILDER only: the price line inside each package tab, written as a
+  // template over {per_item_price} / {per_item_compare_at_price} /
+  // {package_price} / {package_compare_at_price} (see PACK_PRICE_PLACEHOLDERS).
+  // Empty = the widget's own default template. Per-locale versions live in
+  // `translations` under the reserved "packPrice" key.
+  packPriceTemplate String     @default("")
+  // SLOT_BUILDER only: the per-item line under the widget's price, same
+  // shortcodes as `packPriceTemplate`. Empty = the line isn't rendered at all,
+  // which is why this one defaults to real copy rather than "": it's the
+  // sentence the widget used to hard-code, so an upgraded shop keeps saying
+  // what it said before. Per-locale versions live in `translations` under the
+  // "pricePerUnit" key, alongside the rest of the widget's copy.
+  pricePerUnitTemplate String  @default("That's only {per_item_price} per item.")
   accentColor     String       @default("#1a1a1a")
   showPrices      Boolean      @default(false)
   // SLOT_BUILDER only: skip the cart entirely and send the customer straight

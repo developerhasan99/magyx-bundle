@@ -10,6 +10,8 @@ import {
   buildLocaleValueResolver,
   buildPackageTextResolver,
   buildTranslator,
+  PACK_PRICE_TEMPLATE_DEFAULT,
+  PACK_PRICE_TEXT_KEY,
 } from "../app/utils/slot-builder-text";
 
 /* Magyx Bundle builder: customer fills every slot from the merchant's
@@ -542,6 +544,77 @@ import {
         }
       }
 
+      /* Fills a merchant's price template ("{per_item_compare_at_price}
+         {per_item_price} / bottle") with a package's money, for the two lines
+         written that way: the price inside each pack tab and the per-item
+         line under the total.
+
+         `per_item_*` divide by the package's own slot count rather than
+         summing the pool's item prices, so neither line can disagree with the
+         total. Dividing is always safe — a package with no slot count takes
+         the whole widget down at init.
+
+         Both compare-at shortcodes resolve to nothing unless the compare-at
+         is genuinely higher than what the shopper pays, the same rule
+         renderPrice() applies: neither line may strike through a price that
+         isn't a saving. That can leave a stray space where the shortcode was,
+         which HTML collapses. */
+      function priceTemplateHtml(template, pkg) {
+        var slots = pkg.slotCount;
+        var compare =
+          pkg.compareAtPrice != null && pkg.compareAtPrice > pkg.price
+            ? pkg.compareAtPrice
+            : null;
+        var money = {
+          package_price: formatMoney(pkg.price, moneyFormat),
+          per_item_price: formatMoney(pkg.price / slots, moneyFormat),
+          package_compare_at_price:
+            compare == null ? null : formatMoney(compare, moneyFormat),
+          per_item_compare_at_price:
+            compare == null ? null : formatMoney(compare / slots, moneyFormat),
+        };
+        // The per-item line's original placeholder, before it grew the same
+        // shortcode set as the pack tabs. Still honoured so a shop that
+        // translated "Nur {amount} pro Stück" doesn't start showing the raw
+        // shortcode in German.
+        money.amount = money.per_item_price;
+
+        /* Escaped first, then the shortcodes are swapped for markup — the
+           merchant's own words can't smuggle in HTML, and escaping leaves
+           `{...}` untouched so every shortcode still matches afterwards. An
+           unknown one is left as typed (same as `interpolate`), so a typo
+           shows up on the storefront instead of silently vanishing. */
+        return escapeHtml(template).replace(
+          /\{(\w+)\}/g,
+          function (match, name) {
+            if (!Object.prototype.hasOwnProperty.call(money, name)) return match;
+            if (money[name] == null) return "";
+            return (
+              '<span class="magyx-slot-builder__money magyx-slot-builder__money--' +
+              (name.indexOf("compare") === -1 ? "sale" : "compare") +
+              '">' +
+              escapeHtml(money[name]) +
+              "</span>"
+            );
+          },
+        );
+      }
+
+      /* The price line inside a pack tab. Defaults to the per-item pair
+         rather than the pack total: "$24.75 a bottle" is what makes a bigger
+         pack look like the better deal at a glance, and the total is still
+         spelled out under the tabs by renderPrice(). */
+      function packPriceHtml(pkg) {
+        if (pkg.price == null) return "";
+        var template = t(PACK_PRICE_TEXT_KEY) || settings.packPriceTemplate || "";
+        if (!template.trim()) template = PACK_PRICE_TEMPLATE_DEFAULT;
+        return (
+          '<span class="magyx-slot-builder__pack-tab-price">' +
+          priceTemplateHtml(template, pkg) +
+          "</span>"
+        );
+      }
+
       function renderPacks() {
         var container = stateEl.querySelector('[data-sb="packs"]');
         if (!container) return;
@@ -570,11 +643,7 @@ import {
             '<span class="magyx-slot-builder__pack-tab-label">' +
             escapeHtml(packageText.field(pkg, "label")) +
             "</span>" +
-            (pkg.price != null
-              ? '<span class="magyx-slot-builder__pack-tab-price">' +
-                formatMoney(pkg.price, moneyFormat) +
-                "</span>"
-              : "");
+            packPriceHtml(pkg);
           tab.addEventListener("click", function () {
             selectPackage(index);
           });
@@ -602,7 +671,6 @@ import {
         priceEl.hidden = false;
         priceSaleEl.textContent = formatMoney(salePrice, moneyFormat);
 
-        var slots = pkg.slotCount || 0;
         var comparePrice = pkg.compareAtPrice != null ? pkg.compareAtPrice : null;
         var hasSavings = comparePrice != null && comparePrice > salePrice;
         priceCompareEl.hidden = !hasSavings;
@@ -622,13 +690,18 @@ import {
           });
         }
 
-        if (slots > 0) {
-          pricePerUnitEl.hidden = false;
-          pricePerUnitEl.textContent = t("pricePerUnit", {
-            amount: formatMoney(salePrice / slots, moneyFormat),
-          });
-        } else {
-          pricePerUnitEl.hidden = true;
+        /* Same shortcode template treatment as the pack tabs, including the
+           struck-through compare-at — `t()` is asked for the raw string (no
+           vars) so the shortcodes survive to priceTemplateHtml.
+
+           A merchant who clears the Storefront field gets no line at all,
+           which is why this key alone has no built-in English default to fall
+           back to: one would resurrect the line they just deleted. */
+        var perUnitTemplate =
+          t("pricePerUnit") || settings.pricePerUnitTemplate || "";
+        pricePerUnitEl.hidden = !perUnitTemplate.trim();
+        if (!pricePerUnitEl.hidden) {
+          pricePerUnitEl.innerHTML = priceTemplateHtml(perUnitTemplate, pkg);
         }
       }
 
