@@ -163,6 +163,11 @@ model BundlePackage {
   // own and formatting it client-side would ignore currency conversion.
   compareAtPrice   Float?
   freeShipping     Boolean             @default(false)
+  // SLOT_BUILDER only: the package the storefront widget opens on. No package
+  // flagged (the case for every bundle predating this column) means the first
+  // one, so nothing had to be backfilled; more than one is impossible through
+  // the editor, and the widget takes the first it finds either way.
+  isDefault        Boolean             @default(false)
   shopifyVariantId String?
   // SLOT_BUILDER only: this package's own product pool + slot count,
   // independent per package (e.g. "30ml" and "100ml" can offer different

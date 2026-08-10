@@ -336,6 +336,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         pricingValue: p.pricingValue,
         compareAtPrice: p.compareAtPrice,
         freeShipping: p.freeShipping,
+        isDefault: p.isDefault,
         shopifyVariantId: p.shopifyVariantId,
         poolSource: p.poolSource,
         slotCount: p.slotCount,
@@ -615,6 +616,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             pricingValue: pkg.pricingValue,
             compareAtPrice: pkg.compareAtPrice,
             freeShipping: pkg.freeShipping,
+            isDefault: pkg.isDefault,
             poolSource: pkg.poolSource,
             slotCount: pkg.slotCount,
             poolVariantIds: pkg.items
@@ -719,6 +721,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
               pricingValue: String(p.pricingValue),
               compareAtPrice: p.compareAtPrice == null ? "" : String(p.compareAtPrice),
               freeShipping: p.freeShipping,
+              isDefault: p.isDefault ?? false,
               poolSource: p.poolSource ?? "PRODUCTS",
               collections: (p.collections ?? []) as CollectionState[],
               collectionPoolItems: (p.collectionPoolItems ?? []) as ResolvedPoolItem[],
@@ -1122,6 +1125,15 @@ export default function BundleBuilder() {
   const removeActivePackage = useCallback(() => {
     setPackages((current) => current.filter((_, i) => i !== activePackageIndex));
   }, [activePackageIndex]);
+
+  // Exactly one package can be the storefront default, so setting one clears
+  // the rest. Removing that package leaves none flagged, which the widget
+  // reads as "open on the first" — no repair pass needed.
+  const setPackageDefault = useCallback((index: number) => {
+    setPackages((current) =>
+      current.map((pkg, i) => ({ ...pkg, isDefault: i === index })),
+    );
+  }, []);
 
   // paidItems/giftItems split the active items list for rendering and price
   // math without mutating storage shape. FIXED and SLOT_BUILDER both keep
@@ -1728,6 +1740,9 @@ export default function BundleBuilder() {
                     ? null
                     : parseFloat(pkg.compareAtPrice) || null,
                 freeShipping: pkg.freeShipping,
+                // Only Build a Box acts on it — the "what's inside" widget
+                // renders its tabs in Liquid, first one active.
+                isDefault: type === "SLOT_BUILDER" && pkg.isDefault,
                 poolSource: type === "SLOT_BUILDER" ? pkg.poolSource : "PRODUCTS",
                 slotCount: type === "SLOT_BUILDER" ? parseInt(pkg.slotCount, 10) || 0 : 0,
                 collectionIds: pkgUsesCollections ? pkg.collections.map((c) => c.id) : [],
@@ -1990,6 +2005,11 @@ export default function BundleBuilder() {
                       setActivePackageIndex={setActivePackageIndex}
                       updateActivePackage={updateActivePackage}
                       removeActivePackage={removeActivePackage}
+                      /* FIXED's tabs are Liquid-rendered with the first one
+                         active, so the control would be a no-op there. */
+                      setPackageDefault={
+                        type === "SLOT_BUILDER" ? setPackageDefault : undefined
+                      }
                     />
                     <Divider />
                     {/* Pricing is always per package here — this section only

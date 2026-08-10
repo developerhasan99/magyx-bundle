@@ -73,6 +73,9 @@ export interface PackageInput {
   // computed one (components summed / pool average x slots).
   compareAtPrice: number | null;
   freeShipping: boolean;
+  // SLOT_BUILDER only: the package the storefront widget opens on. All false
+  // (every bundle predating the flag) means the first one.
+  isDefault: boolean;
   // SLOT_BUILDER only: this package's own product pool + slot count — ALL |
   // PRODUCTS scope isn't used here (unlike QUANTITY_BREAKS), just PRODUCTS |
   // COLLECTIONS. Ignored (left at defaults) for FIXED.
@@ -218,6 +221,7 @@ function packagesCreateData(packages: PackageInput[]) {
     pricingValue: pkg.pricingValue,
     compareAtPrice: pkg.compareAtPrice,
     freeShipping: pkg.freeShipping,
+    isDefault: pkg.isDefault,
     poolSource: pkg.poolSource,
     slotCount: pkg.slotCount,
     collectionIds: JSON.stringify(pkg.collectionIds),
@@ -308,6 +312,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         pricingValue: pkg.pricingValue,
         compareAtPrice: pkg.compareAtPrice,
         freeShipping: pkg.freeShipping,
+        isDefault: pkg.isDefault,
         poolSource: pkg.poolSource,
         slotCount: pkg.slotCount,
         collectionIds: JSON.stringify(pkg.collectionIds),
@@ -445,6 +450,7 @@ export async function duplicateBundle(shop: string, id: string) {
       pricingValue: pkg.pricingValue,
       compareAtPrice: pkg.compareAtPrice,
       freeShipping: pkg.freeShipping,
+      isDefault: pkg.isDefault,
       poolSource: pkg.poolSource,
       slotCount: pkg.slotCount,
       collectionIds: JSON.parse(pkg.collectionIds) as string[],

@@ -1741,6 +1741,8 @@ interface SlotBuilderPackageInput {
   badgeTone?: string | null;
   pricingValue: number; // always FIXED_PRICE
   freeShipping: boolean;
+  /** Opens the widget on this package. False on every package = the first. */
+  isDefault: boolean;
   poolSource: string; // PRODUCTS | COLLECTIONS
   slotCount: number;
   // PRODUCTS-sourced pool variant ids — used to compute this package's
@@ -2300,6 +2302,7 @@ export async function publishSlotBuilderBundleProduct(
         ),
         slotCount: pkg.slotCount,
         freeShipping: pkg.freeShipping,
+        isDefault: pkg.isDefault,
         tagFilters: pkg.tagFilters,
         poolSnapshot: poolSnapshotsByPackage[index],
         // A package's OWN gifts only — the widget builds the progressive

@@ -1,4 +1,4 @@
-import { InlineStack, TextField, Select, Button } from "@shopify/polaris";
+import { InlineStack, TextField, Select, Button, Badge, Text } from "@shopify/polaris";
 import { DeleteIcon } from "@shopify/polaris-icons";
 import { PackageTab } from "./PackageTab";
 import { BADGE_TONE_OPTIONS, type PackageState } from "./types";
@@ -47,14 +47,25 @@ export function PackagesTabsSection({
   setActivePackageIndex,
   updateActivePackage,
   removeActivePackage,
+  setPackageDefault,
 }: {
   packages: PackageState[];
   activePackageIndex: number;
   setActivePackageIndex: (index: number) => void;
   updateActivePackage: (patch: Partial<PackageState>) => void;
   removeActivePackage: () => void;
+  /** Omitted for FIXED, whose tabs are Liquid-rendered with the first one
+      active — offering the choice there would be a control that does nothing. */
+  setPackageDefault?: (index: number) => void;
 }) {
   if (packages.length <= 1) return null;
+
+  // No package flagged is the normal state for a bundle saved before this
+  // existed, and the widget opens on the first one — so show the first as the
+  // default rather than leaving the merchant with no badge anywhere.
+  const defaultIndex = packages.findIndex((pkg) => pkg.isDefault);
+  const isActiveDefault =
+    activePackageIndex === (defaultIndex === -1 ? 0 : defaultIndex);
 
   return (
     <>
@@ -63,6 +74,23 @@ export function PackagesTabsSection({
         activePackageIndex={activePackageIndex}
         setActivePackageIndex={setActivePackageIndex}
       />
+      {setPackageDefault && (
+        <InlineStack gap="200" blockAlign="center">
+          {isActiveDefault ? (
+            <Badge tone="success">Opens by default</Badge>
+          ) : (
+            <Button
+              variant="plain"
+              onClick={() => setPackageDefault(activePackageIndex)}
+            >
+              Open on this package by default
+            </Button>
+          )}
+          <Text as="span" variant="bodySm" tone="subdued">
+            The package the box builder starts on.
+          </Text>
+        </InlineStack>
+      )}
       <InlineStack gap="300" wrap blockAlign="end">
         <div style={{ minWidth: 200, flex: 1 }}>
           <TextField

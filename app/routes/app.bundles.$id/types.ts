@@ -115,6 +115,9 @@ export interface PackageState {
   // Optional compare-at override. Empty string = use the computed one.
   compareAtPrice: string;
   freeShipping: boolean;
+  // SLOT_BUILDER only: the package the storefront widget opens on. False on
+  // every package (an older bundle, or one never edited) means the first.
+  isDefault: boolean;
   items: ItemState[];
   // SLOT_BUILDER only: this package's own product pool + slot count.
   // Unused by FIXED (stays at defaults).
@@ -144,6 +147,7 @@ export function defaultPackageState(): PackageState {
     pricingValue: "",
     compareAtPrice: "",
     freeShipping: false,
+    isDefault: false,
     items: [],
     poolSource: "PRODUCTS",
     collections: [],

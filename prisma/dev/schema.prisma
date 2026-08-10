@@ -136,6 +136,9 @@ model BundlePackage {
   // production schema.
   compareAtPrice   Float?
   freeShipping     Boolean             @default(false)
+  // SLOT_BUILDER only: the package the widget opens on. See the production
+  // schema — unset on every package means the first one.
+  isDefault        Boolean             @default(false)
   shopifyVariantId String?
   // SLOT_BUILDER only: this package's own product pool + slot count,
   // independent per package (e.g. "30ml" and "100ml" can offer different

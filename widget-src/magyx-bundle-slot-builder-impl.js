@@ -327,7 +327,18 @@ import {
 
       // variantId -> { productId, variantId, title, image, price, quantity }
       var selections = new Map();
+      /* The pack the merchant marked as default, else the first — which is
+         both what every bundle predating the flag gets (nothing to backfill)
+         and what happens if the default package is later deleted. Only the
+         opening pack is affected: gifts and free shipping still inherit from
+         packages *before* it, exactly as when the shopper switches tabs. */
       var activePackageIndex = 0;
+      for (var p = 0; p < packages.length; p++) {
+        if (packages[p].isDefault) {
+          activePackageIndex = p;
+          break;
+        }
+      }
 
       function currentPoolItems() {
         var pkg = activePackage();
@@ -531,8 +542,9 @@ import {
 
       // "checkout" mode reads activePackage().variantId directly at add-to-
       // cart time, so only "native" mode needs the theme's form kept in
-      // sync as the shopper switches packs (and once up front, in case the
-      // theme's default variant isn't packages[0]).
+      // sync as the shopper switches packs (and once up front, since the
+      // theme's own selected variant has no idea which pack the merchant
+      // marked as the default one to open on).
       function syncActiveVariant() {
         if (ctaMode !== "native") return;
         var pkg = activePackage();
