@@ -36,6 +36,8 @@ export function StorefrontSection({
   setPackPriceTemplate,
   pricePerUnitTemplate,
   setPricePerUnitTemplate,
+  giftsBeforeSlots = false,
+  setGiftsBeforeSlots,
   showPrices,
   setShowPrices,
   itemSubtextTemplate,
@@ -63,6 +65,9 @@ export function StorefrontSection({
   /** SLOT_BUILDER only — "" hides the per-item line rather than defaulting. */
   pricePerUnitTemplate: string;
   setPricePerUnitTemplate: (value: string) => void;
+  // SLOT_BUILDER only — FIXED bundles never pass these
+  giftsBeforeSlots?: boolean;
+  setGiftsBeforeSlots?: (value: boolean) => void;
   showPrices: boolean;
   setShowPrices: (value: boolean) => void;
   itemSubtextTemplate: string;
@@ -228,6 +233,16 @@ export function StorefrontSection({
           onChange={setShowSubtextOnGifts}
           helpText="Turn off to hide the subtext line for items marked as a free gift."
         />
+        {/* Build a box only — it's the one widget with slots to order the
+            gifts against. */}
+        {isSlotBuilder && setGiftsBeforeSlots && (
+          <Checkbox
+            label="Show free gifts first"
+            checked={giftsBeforeSlots}
+            onChange={setGiftsBeforeSlots}
+            helpText="Off (default): the gifts sit under the slots, so the customer sees what to do first. On: they move to the top, above “Choose 2 more products” — worth it when the gifts are the reason to buy."
+          />
+        )}
       </BlockStack>
 
       {isSlotBuilder && setSkipCart && (

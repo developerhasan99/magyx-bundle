@@ -1797,6 +1797,8 @@ interface SlotBuilderPublishInput {
     // Submit the moment the last slot is filled. Only meaningful alongside
     // skipCart — the caller is responsible for forcing it false otherwise.
     autoCheckout: boolean;
+    /** Gift cards above the progress line rather than under the slots. */
+    giftsBeforeSlots: boolean;
     itemSubtextTemplate: string;
     showSubtextOnGifts: boolean;
   };

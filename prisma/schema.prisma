@@ -62,6 +62,10 @@ model Bundle {
   // they had. Meaningless without skipCart (there'd be no button of ours to
   // press), so the editor disables it and the publish step forces it false.
   autoCheckout    Boolean      @default(false)
+  // SLOT_BUILDER only: lift the free-gift cards above the progress line —
+  // i.e. above the whole builder, not just the slot rows — for a bundle whose
+  // gifts are the reason to buy. Off, they sit under the slots.
+  giftsBeforeSlots Boolean     @default(false)
   // Plain text + {{sku}}/{{vendor}}/{{type}}/{{barcode}}/{{weight}}/{{metafield:ns.key}}
   // placeholders, resolved per-item and rendered under each product's title
   itemSubtextTemplate String   @default("")

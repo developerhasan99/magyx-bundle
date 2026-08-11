@@ -310,6 +310,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       showPrices: bundle.showPrices,
       skipCart: bundle.skipCart,
       autoCheckout: bundle.autoCheckout,
+      giftsBeforeSlots: bundle.giftsBeforeSlots,
       poolMode: bundle.poolMode,
       itemSubtextTemplate: bundle.itemSubtextTemplate,
       showSubtextOnGifts: bundle.showSubtextOnGifts,
@@ -604,6 +605,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             showPrices: bundle.showPrices,
             skipCart: bundle.skipCart,
             autoCheckout: bundle.skipCart && bundle.autoCheckout,
+            giftsBeforeSlots: bundle.giftsBeforeSlots,
             itemSubtextTemplate: bundle.itemSubtextTemplate,
             showSubtextOnGifts: bundle.showSubtextOnGifts,
           },
@@ -692,6 +694,7 @@ function formStateOf(bundle: LoaderBundle, requestedType?: string | null) {
     showPrices: bundle?.showPrices ?? false,
     skipCart: bundle?.skipCart ?? false,
     autoCheckout: bundle?.autoCheckout ?? false,
+    giftsBeforeSlots: bundle?.giftsBeforeSlots ?? false,
     poolMode: bundle?.poolMode ?? "PER_PACKAGE",
     itemSubtextTemplate: bundle?.itemSubtextTemplate ?? "",
     showSubtextOnGifts: bundle?.showSubtextOnGifts ?? true,
@@ -842,6 +845,9 @@ export default function BundleBuilder() {
   const [showPrices, setShowPrices] = useState(initialForm.showPrices);
   const [skipCart, setSkipCart] = useState(initialForm.skipCart);
   const [autoCheckout, setAutoCheckout] = useState(initialForm.autoCheckout);
+  const [giftsBeforeSlots, setGiftsBeforeSlots] = useState(
+    initialForm.giftsBeforeSlots,
+  );
   const [poolMode, setPoolMode] = useState(initialForm.poolMode);
   const [itemSubtextTemplate, setItemSubtextTemplate] = useState(
     initialForm.itemSubtextTemplate,
@@ -1188,7 +1194,7 @@ export default function BundleBuilder() {
         title, type, status, pricingType, pricingValue, widgetStyle,
         widgetHeading, widgetDescription, packPriceTemplate, pricePerUnitTemplate,
         accentColor, showPrices, skipCart,
-        autoCheckout, poolMode,
+        autoCheckout, giftsBeforeSlots, poolMode,
         itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations, items,
         packages: stripCollectionPoolItems(packages),
         collections, collectionPoolItems, poolSource,
@@ -1202,7 +1208,7 @@ export default function BundleBuilder() {
       initialForm, title, type, status, pricingType, pricingValue,
       widgetStyle, widgetHeading, widgetDescription, packPriceTemplate,
       pricePerUnitTemplate, accentColor, showPrices, skipCart, autoCheckout,
-      poolMode, itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations,
+      giftsBeforeSlots, poolMode, itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations,
       items, packages, collections,
       collectionPoolItems, poolSource,
       minItems, maxItems, tiers, qbTiers,
@@ -1231,6 +1237,7 @@ export default function BundleBuilder() {
       setShowPrices(form.showPrices);
       setSkipCart(form.skipCart);
       setAutoCheckout(form.autoCheckout);
+      setGiftsBeforeSlots(form.giftsBeforeSlots);
       setPoolMode(form.poolMode);
       setItemSubtextTemplate(form.itemSubtextTemplate);
       setShowSubtextOnGifts(form.showSubtextOnGifts);
@@ -1682,6 +1689,8 @@ export default function BundleBuilder() {
       // button only exists when skipCart is on, so auto checkout has nothing
       // to drive without it.
       autoCheckout: skipCart && autoCheckout,
+      // Only Build a Box has slots to put them before.
+      giftsBeforeSlots: type === "SLOT_BUILDER" && giftsBeforeSlots,
       // Authoring-only, and only Build a box offers the choice.
       poolMode: type === "SLOT_BUILDER" ? poolMode : "PER_PACKAGE",
       itemSubtextTemplate,
@@ -1791,7 +1800,7 @@ export default function BundleBuilder() {
     fetcher, title, description, type, status, pricingType, pricingValue,
     widgetStyle, widgetHeading, widgetDescription, packPriceTemplate,
     pricePerUnitTemplate, accentColor, showPrices, skipCart, autoCheckout,
-    poolMode, itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations, items,
+    giftsBeforeSlots, poolMode, itemSubtextTemplate, showSubtextOnGifts, freeShipping, translations, items,
     packages, minItems, maxItems,
     tiers, poolSource, collections, qbTiers,
   ]);
@@ -2243,6 +2252,8 @@ export default function BundleBuilder() {
                     skipCart={skipCart}
                     setSkipCart={onSkipCartChange}
                     autoCheckout={autoCheckout}
+                    giftsBeforeSlots={giftsBeforeSlots}
+                    setGiftsBeforeSlots={setGiftsBeforeSlots}
                     setAutoCheckout={setAutoCheckout}
                   />
                 </Card>

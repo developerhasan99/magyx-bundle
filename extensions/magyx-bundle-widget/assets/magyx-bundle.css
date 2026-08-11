@@ -995,6 +995,7 @@
 .magyx-slot-builder__progress {
   font-weight: 600;
   margin-bottom: 10px;
+  margin-top: 16px;
 }
 
 .magyx-slot-builder__progress--complete {

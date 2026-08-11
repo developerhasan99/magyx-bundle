@@ -44,6 +44,8 @@ model Bundle {
   // SLOT_BUILDER only: GLOBAL (one shared pool, copied onto every package on
   // save) | PER_PACKAGE. See the production schema.
   poolMode        String       @default("PER_PACKAGE")
+  // SLOT_BUILDER only: gift cards above the slot list. See the production schema.
+  giftsBeforeSlots Boolean     @default(false)
   // Plain text + {{sku}}/{{vendor}}/{{type}}/{{barcode}}/{{weight}}/{{metafield:ns.key}}
   // placeholders, resolved per-item and rendered under each product's title
   itemSubtextTemplate String   @default("")

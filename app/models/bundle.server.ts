@@ -118,6 +118,8 @@ export interface BundleInput {
   // SLOT_BUILDER only: submit as soon as the last slot is filled, without
   // waiting for the customer to press the button. Requires skipCart.
   autoCheckout: boolean;
+  // SLOT_BUILDER only: gift cards above the progress line, not under the slots
+  giftsBeforeSlots: boolean;
   // SLOT_BUILDER only: GLOBAL | PER_PACKAGE. Authoring-only — GLOBAL means
   // the caller has already copied one pool onto every package, so the rows
   // written here look identical either way.
@@ -251,6 +253,7 @@ export async function createBundle(shop: string, input: BundleInput) {
       showPrices: input.showPrices,
       skipCart: input.skipCart,
       autoCheckout: input.autoCheckout,
+      giftsBeforeSlots: input.giftsBeforeSlots,
       poolMode: input.poolMode,
       itemSubtextTemplate: input.itemSubtextTemplate,
       showSubtextOnGifts: input.showSubtextOnGifts,
@@ -351,6 +354,7 @@ export async function updateBundle(shop: string, id: string, input: BundleInput)
         showPrices: input.showPrices,
         skipCart: input.skipCart,
         autoCheckout: input.autoCheckout,
+        giftsBeforeSlots: input.giftsBeforeSlots,
         poolMode: input.poolMode,
         itemSubtextTemplate: input.itemSubtextTemplate,
         showSubtextOnGifts: input.showSubtextOnGifts,
@@ -424,6 +428,7 @@ export async function duplicateBundle(shop: string, id: string) {
     showPrices: source.showPrices,
     skipCart: source.skipCart,
     autoCheckout: source.autoCheckout,
+    giftsBeforeSlots: source.giftsBeforeSlots,
     poolMode: source.poolMode,
     itemSubtextTemplate: source.itemSubtextTemplate,
     showSubtextOnGifts: source.showSubtextOnGifts,

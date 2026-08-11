@@ -387,6 +387,16 @@ import {
         html +=
           '<div class="magyx-slot-builder__packs" data-sb="packs" role="tablist"></div>';
       }
+      /* Gifts go under the slots by default — what the shopper has to do
+         first comes first. `giftsBeforeSlots` lifts them above the progress
+         line instead (so above the whole builder, not just the slot rows),
+         which is what a bundle sold on its gifts wants to lead with.
+
+         Only where this string is written changes: renderGifts() works off
+         the [data-sb] hook and doesn't care where in the tree it ended up. */
+      var giftsHtml =
+        '<div class="magyx-slot-builder__gifts" data-sb="gifts" hidden></div>';
+      if (settings.giftsBeforeSlots) html += giftsHtml;
       html +=
         '<div class="magyx-slot-builder__progress" data-sb="progress"></div>';
       // Supporting copy under the progress line — same reserved-key treatment
@@ -402,8 +412,7 @@ import {
       // One row per slot, filled or empty — the empty rows are themselves the
       // way into the picker, so there's no separate "Add items" button.
       html += '<div class="magyx-slot-builder__slots" data-sb="slots"></div>';
-      html +=
-        '<div class="magyx-slot-builder__gifts" data-sb="gifts" hidden></div>';
+      if (!settings.giftsBeforeSlots) html += giftsHtml;
       html +=
         '<p class="magyx-slot-builder__error" data-sb="error" hidden></p>';
       if (ctaMode === "checkout") {
