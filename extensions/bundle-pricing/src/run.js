@@ -34,7 +34,7 @@ export function run(input) {
     const componentsValue = line.merchandise?.components?.value;
     if (!componentsValue) continue;
     const expandOp = buildExpandOperation(line, componentsValue);
-    if (expandOp) operations.push({ expand: expandOp });
+    if (expandOp) operations.push({ lineExpand: expandOp });
   }
 
   const config = parseJson(input.shop?.config?.value);
@@ -44,7 +44,7 @@ export function run(input) {
 
     for (const line of input.cart.lines) {
       const expandOp = buildSlotBuilderExpandOperation(line, config.bundles);
-      if (expandOp) operations.push({ expand: expandOp });
+      if (expandOp) operations.push({ lineExpand: expandOp });
     }
   }
 
@@ -246,7 +246,7 @@ function buildMixMatchOperations(lines, bundles) {
       const discounted =
         Math.round(original * (1 - tier.discount / 100) * 100) / 100;
       operations.push({
-        update: {
+        lineUpdate: {
           cartLineId: line.id,
           price: {
             adjustment: {
@@ -321,7 +321,7 @@ function buildQuantityBreakOperations(lines, bundles) {
       if (gifts.length > 0 && !giftsAttached) {
         giftsAttached = true;
         operations.push({
-          expand: {
+          lineExpand: {
             cartLineId: line.id,
             expandedCartItems: [
               {
@@ -349,7 +349,7 @@ function buildQuantityBreakOperations(lines, bundles) {
 
       if (needsPriceChange) {
         operations.push({
-          update: {
+          lineUpdate: {
             cartLineId: line.id,
             price: {
               adjustment: {
