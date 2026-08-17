@@ -7,7 +7,7 @@
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
     "build:widget-js": "esbuild widget-src/*.js --bundle --minify --outdir=extensions/magyx-bundle-widget/assets",
-    "deploy": "npm run build:widget-js && shopify app deploy",
+    "deploy": "npm run build:widget-js && npm --workspace bundle-pricing run build && shopify app deploy",
     "config:use": "shopify app config use",
     "env": "shopify app env",
     "start": "remix-serve ./build/server/index.js",

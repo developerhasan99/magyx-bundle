@@ -8,7 +8,10 @@ type = "function"
 description = "Expands fixed bundles into components and applies mix & match tiered discounts at checkout."
 
   [[extensions.targeting]]
-  target = "purchase.cart-transform.run"
+  # `cart.transform.run` is the Cart Transform target for API versions
+  # 2025-07 and later. The old `purchase.cart-transform.run` target can
+  # leave a current-version function registered but not invoked as expected.
+  target = "cart.transform.run"
   input_query = "src/run.graphql"
   export = "run"
 
