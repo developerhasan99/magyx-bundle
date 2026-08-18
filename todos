@@ -1,3 +1,1 @@
-TODO: Add product pool filter based on tags. the input field on the admin for each category will be the button text and key (key is the exact key of the product tag).
-TODO: Implement full scratch product gift feature for the bundle. and make the packages progressive. mean first products gift will be available on all package but the ui will insist to chose next package to get more free items.
-TODO: make possible to translate the bundle.
+TODO: The bundle breaks when Merchant edits any variant data from the product edit page. on the admin.  
