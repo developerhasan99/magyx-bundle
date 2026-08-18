@@ -298,15 +298,32 @@ import {
           // read straight off this reference, so the next modal open or pack
           // switch picks up the fresh data without disturbing any picks the
           // shopper already made against the snapshot.
-          for (var key in poolByVariantId) {
-            if (Object.prototype.hasOwnProperty.call(poolByVariantId, key)) {
-              delete poolByVariantId[key];
+          //
+          // Do not replace the whole map. A bundle can be republished while a
+          // cached product page still has its previous package variant IDs.
+          // In that brief state the proxy response is valid but keyed by the
+          // new IDs; replacing the map would make every old page key resolve
+          // to an empty pool. Merge only response packages the page knows and
+          // retain its publish-time snapshot for unmatched packages.
+          var pagePackageIds = new Set(
+            packages.map(function (pkg) {
+              return numericId(pkg.variantId);
+            }),
+          );
+          var matchedLivePackage = false;
+          for (var liveKey in livePoolByVariantId) {
+            if (
+              Object.prototype.hasOwnProperty.call(livePoolByVariantId, liveKey) &&
+              pagePackageIds.has(liveKey)
+            ) {
+              poolByVariantId[liveKey] = livePoolByVariantId[liveKey];
+              matchedLivePackage = true;
             }
           }
-          for (var liveKey in livePoolByVariantId) {
-            if (Object.prototype.hasOwnProperty.call(livePoolByVariantId, liveKey)) {
-              poolByVariantId[liveKey] = livePoolByVariantId[liveKey];
-            }
+          if (!matchedLivePackage) {
+            console.warn(
+              "Magyx Bundle: live pool package variants do not match this page's published bundle data; keeping the snapshot until the page is refreshed.",
+            );
           }
         } else {
           render(livePoolByVariantId);
