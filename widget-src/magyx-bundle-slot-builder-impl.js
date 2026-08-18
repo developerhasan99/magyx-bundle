@@ -303,23 +303,23 @@ import {
         var unexpectedLivePackageIds = livePackageIds.filter(function (packageId) {
           return pagePackageIds.indexOf(packageId) === -1;
         });
-        if (missingLivePackageIds.length > 0 || unexpectedLivePackageIds.length > 0) {
-          var pagePackageReport = packages.map(function (pkg) {
-            var pageVariantId = numericId(pkg.variantId);
-            var livePackage = (pool.packages || []).find(function (candidate) {
-              return numericId(candidate.variantId) === pageVariantId;
-            });
-            return {
-              label: pkg.label || "(unnamed package)",
-              pageVariantId: pkg.variantId,
-              numericVariantId: pageVariantId,
-              matched: !!livePackage,
-              liveVariantId: livePackage ? livePackage.variantId : null,
-              liveItemCount: livePackage && Array.isArray(livePackage.items)
-                ? livePackage.items.length
-                : null,
-            };
+        var pagePackageReport = packages.map(function (pkg) {
+          var pageVariantId = numericId(pkg.variantId);
+          var livePackage = (pool.packages || []).find(function (candidate) {
+            return numericId(candidate.variantId) === pageVariantId;
           });
+          return {
+            label: pkg.label || "(unnamed package)",
+            pageVariantId: pkg.variantId,
+            numericVariantId: pageVariantId,
+            matched: !!livePackage,
+            liveVariantId: livePackage ? livePackage.variantId : null,
+            liveItemCount: livePackage && Array.isArray(livePackage.items)
+              ? livePackage.items.length
+              : null,
+          };
+        });
+        if (missingLivePackageIds.length > 0 || unexpectedLivePackageIds.length > 0) {
           var unexpectedLivePackageReport = (pool.packages || [])
             .filter(function (pkg) {
               return pagePackageIds.indexOf(numericId(pkg.variantId)) === -1;
@@ -341,6 +341,11 @@ import {
               unexpectedPackageVariantIds: unexpectedLivePackageIds,
             },
           );
+        } else {
+          console.info("Magyx Bundle: live pool package variants match this page.", {
+            bundleId: data.bundleId,
+            pagePackages: pagePackageReport,
+          });
         }
         if (rendered) {
           // Update the same object in place — currentPoolItems()/renderList()
