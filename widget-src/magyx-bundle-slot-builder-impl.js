@@ -293,6 +293,55 @@ import {
       .then(function (pool) {
         var livePoolByVariantId = buildPoolMap(pool.packages, "items");
         carryOverSubtext(poolByVariantId, livePoolByVariantId);
+        var pagePackageIds = packages.map(function (pkg) {
+          return numericId(pkg.variantId);
+        });
+        var livePackageIds = Object.keys(livePoolByVariantId);
+        var missingLivePackageIds = pagePackageIds.filter(function (packageId) {
+          return livePackageIds.indexOf(packageId) === -1;
+        });
+        var unexpectedLivePackageIds = livePackageIds.filter(function (packageId) {
+          return pagePackageIds.indexOf(packageId) === -1;
+        });
+        if (missingLivePackageIds.length > 0 || unexpectedLivePackageIds.length > 0) {
+          var pagePackageReport = packages.map(function (pkg) {
+            var pageVariantId = numericId(pkg.variantId);
+            var livePackage = (pool.packages || []).find(function (candidate) {
+              return numericId(candidate.variantId) === pageVariantId;
+            });
+            return {
+              label: pkg.label || "(unnamed package)",
+              pageVariantId: pkg.variantId,
+              numericVariantId: pageVariantId,
+              matched: !!livePackage,
+              liveVariantId: livePackage ? livePackage.variantId : null,
+              liveItemCount: livePackage && Array.isArray(livePackage.items)
+                ? livePackage.items.length
+                : null,
+            };
+          });
+          var unexpectedLivePackageReport = (pool.packages || [])
+            .filter(function (pkg) {
+              return pagePackageIds.indexOf(numericId(pkg.variantId)) === -1;
+            })
+            .map(function (pkg) {
+              return {
+                liveVariantId: pkg.variantId,
+                numericVariantId: numericId(pkg.variantId),
+                liveItemCount: Array.isArray(pkg.items) ? pkg.items.length : null,
+              };
+            });
+          console.warn(
+            "Magyx Bundle: package variant mismatch between this page and the live pool response; keeping the snapshot for unmatched page packages.",
+            {
+              bundleId: data.bundleId,
+              pagePackages: pagePackageReport,
+              unexpectedLivePackages: unexpectedLivePackageReport,
+              missingPackageVariantIds: missingLivePackageIds,
+              unexpectedPackageVariantIds: unexpectedLivePackageIds,
+            },
+          );
+        }
         if (rendered) {
           // Update the same object in place — currentPoolItems()/renderList()
           // read straight off this reference, so the next modal open or pack
@@ -305,16 +354,12 @@ import {
           // new IDs; replacing the map would make every old page key resolve
           // to an empty pool. Merge only response packages the page knows and
           // retain its publish-time snapshot for unmatched packages.
-          var pagePackageIds = new Set(
-            packages.map(function (pkg) {
-              return numericId(pkg.variantId);
-            }),
-          );
+          var pagePackageIdSet = new Set(pagePackageIds);
           var matchedLivePackage = false;
           for (var liveKey in livePoolByVariantId) {
             if (
               Object.prototype.hasOwnProperty.call(livePoolByVariantId, liveKey) &&
-              pagePackageIds.has(liveKey)
+              pagePackageIdSet.has(liveKey)
             ) {
               poolByVariantId[liveKey] = livePoolByVariantId[liveKey];
               matchedLivePackage = true;
@@ -322,7 +367,7 @@ import {
           }
           if (!matchedLivePackage) {
             console.warn(
-              "Magyx Bundle: live pool package variants do not match this page's published bundle data; keeping the snapshot until the page is refreshed.",
+              "Magyx Bundle: none of the live pool package variants match this page's published bundle data; keeping the snapshot until the page is refreshed.",
             );
           }
         } else {
