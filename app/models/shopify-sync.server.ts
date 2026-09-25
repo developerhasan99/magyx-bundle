@@ -233,7 +233,7 @@ export async function resolveCollectionProductIds(
         query quantityBreakCollectionProducts($id: ID!, $cursor: String) {
           collection(id: $id) {
             products(first: 250, after: $cursor) {
-              edges { node { id } }
+              edges { node { id status } }
               pageInfo { hasNextPage endCursor }
             }
           }
@@ -244,14 +244,18 @@ export async function resolveCollectionProductIds(
         data?: {
           collection?: {
             products?: {
-              edges: { node: { id: string } }[];
+              edges: { node: { id: string; status: string } }[];
               pageInfo: { hasNextPage: boolean; endCursor: string | null };
             };
           };
         };
       } = await response.json();
       const products = json.data?.collection?.products;
-      for (const edge of products?.edges ?? []) ids.add(edge.node.id);
+      // The Admin API lists a collection's DRAFT/ARCHIVED members too — keep
+      // only what a shopper can actually buy.
+      for (const edge of products?.edges ?? []) {
+        if (edge.node.status === "ACTIVE") ids.add(edge.node.id);
+      }
       hasNextPage = products?.pageInfo?.hasNextPage ?? false;
       cursor = products?.pageInfo?.endCursor ?? null;
       if (limit != null && ids.size >= limit) break;
@@ -1087,6 +1091,7 @@ export async function fetchProductPoolItems(
           nodes(ids: $ids) {
             ... on Product {
               id
+              status
               title
               tags
               featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
@@ -1113,7 +1118,9 @@ export async function fetchProductPoolItems(
   for (const response of responses) {
     const json = await response.json();
     for (const product of json.data?.nodes ?? []) {
-      if (!product) continue;
+      // Deleted products come back null; DRAFT/ARCHIVED ones still resolve
+      // through the Admin API, so they have to be dropped explicitly.
+      if (!product || product.status !== "ACTIVE") continue;
       for (const edge of product.variants?.edges ?? []) {
         const variant = edge.node;
         if (trimmedFilter && !(variant.title ?? "").toLowerCase().includes(trimmedFilter)) continue;
@@ -1165,6 +1172,7 @@ export async function fetchVariantPoolItems(
               image { url(transform: { maxWidth: 360, maxHeight: 360 }) }
               product {
                 id
+                status
                 title
                 tags
                 featuredImage { url(transform: { maxWidth: 360, maxHeight: 360 }) }
@@ -1181,7 +1189,9 @@ export async function fetchVariantPoolItems(
   for (const response of responses) {
     const json = await response.json();
     for (const variant of json.data?.nodes ?? []) {
-      if (!variant || !variant.product) continue;
+      // A merchant-picked product can be set back to DRAFT/ARCHIVED after
+      // the fact — the Admin API still resolves it, so drop it here.
+      if (!variant || !variant.product || variant.product.status !== "ACTIVE") continue;
       items.push({
         productId: variant.product.id,
         variantId: variant.id,
